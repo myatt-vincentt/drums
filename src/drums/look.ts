@@ -1,88 +1,106 @@
-// How the kit is lit and shaded: a small studio environment for the chrome,
-// the cymbals and the lacquered shells to reflect, and a soft highlight
-// roll-off so the gloss never clips to flat white.
+// How the kit is shaded: physically based materials (a lacquered clear coat
+// on the shells, mirror chrome, bronze cymbals, coated heads) that reflect
+// the studio itself, with a filmic tone curve so highlights roll off softly.
 import {
   Color,
-  PMREMGenerator,
+  MeshPhysicalMaterial,
+  MeshStandardMaterial,
   type Material,
-  type MeshStandardMaterial,
-  type Texture,
-  type WebGLRenderer,
+  type Mesh,
+  type Object3D,
 } from "three";
-// eslint-disable-next-line import/extensions
-import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 
-/** The shells' lacquer (the model's own red, a touch brighter). */
-export const SHELL_COLOR = "#7a0717";
+/** Tone curve exposure, day and night. */
+export const EXPOSURE = { day: 0.88, night: 1.1 };
 
-/** How strongly each material reflects the studio. */
-const ENV: Record<string, number> = {
-  Shell: 0.9,
-  Chrome: 0.7,
-  Cymbal: 0.9,
-  Head: 0.35,
-  Rubber: 0.2,
-  Wood: 0.3,
+type Finish = {
+  /** How strongly it reflects the room. */
+  env: number;
+  roughness?: number;
+  metalness?: number;
+  clearcoat?: number;
+  clearcoatRoughness?: number;
+  color?: string;
 };
 
-let env: Texture | null = null;
-
-/** The studio reflection map (made once per renderer). */
-export const studioEnvironment = (gl: WebGLRenderer) => {
-  if (!env) {
-    const pmrem = new PMREMGenerator(gl);
-    env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-    pmrem.dispose();
-  }
-  return env;
+/** Each kit material's finish (the model's own maps are kept). */
+const FINISH: Record<string, Finish> = {
+  // Lacquered wood shells: a deep red under a glossy clear coat.
+  Shell: {
+    env: 1,
+    roughness: 0.42,
+    metalness: 0,
+    clearcoat: 1,
+    clearcoatRoughness: 0.05,
+  },
+  // Mirror chrome hardware.
+  Chrome: { env: 1.1, roughness: 0.12, metalness: 1 },
+  // Bronze: metal, its colour from the model's texture.
+  Cymbal: { env: 1, metalness: 1, roughness: 0.32 },
+  // Coated heads: soft, satin.
+  Head: {
+    env: 0.5,
+    roughness: 0.62,
+    metalness: 0,
+    clearcoat: 0.15,
+    clearcoatRoughness: 0.5,
+  },
+  Rubber: { env: 0.3, roughness: 0.8, metalness: 0 },
+  Wood: {
+    env: 0.5,
+    roughness: 0.45,
+    metalness: 0,
+    clearcoat: 0.4,
+    clearcoatRoughness: 0.25,
+  },
 };
 
-/**
- * The scene renders without tone mapping (so the camera picture stays true),
- * which lets bright highlights clip to flat white. The kit and sticks get
- * their own soft roll-off instead (Khronos PBR Neutral, a little under 1:1),
- * so the chrome and the cymbals keep their shading and glints stay small.
- */
-const EXPOSURE = 0.95;
-const NEUTRAL_GLSL = /* glsl */ `
-vec3 drumsNeutral( vec3 color ) {
-  const float start = 0.76;
-  const float desaturation = 0.15;
-  float x = min( color.r, min( color.g, color.b ) );
-  float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
-  color -= offset;
-  float peak = max( color.r, max( color.g, color.b ) );
-  if ( peak < start ) return color;
-  float d = 1. - start;
-  float newPeak = 1. - d * d / ( peak + d - start );
-  color *= newPeak / peak;
-  float g = 1. - 1. / ( desaturation * ( peak - newPeak ) + 1. );
-  return mix( color, vec3( newPeak ), g );
-}
-`;
+const upgraded = new Map<Material, Material>();
 
-/* eslint-disable no-param-reassign */
-const softHighlights = (m: Material) => {
-  m.onBeforeCompile = (shader) => {
-    shader.fragmentShader = `${NEUTRAL_GLSL}\n${shader.fragmentShader.replace(
-      "#include <tonemapping_fragment>",
-      `gl_FragColor.rgb = drumsNeutral( gl_FragColor.rgb * ${EXPOSURE.toFixed(2)} );`,
-    )}`;
-  };
-  m.customProgramCacheKey = () => "drums-neutral";
-};
-
-/** Sets up one of the model's materials (each is shared, so once). */
-export const dressMaterial = (m: Material, envMap: Texture) => {
-  if (m.userData.dressed) return;
-  m.userData.dressed = true;
+/** A kit material with its finish: physical (clear coat) where it needs it. */
+const finish = (m: Material): Material => {
+  const done = upgraded.get(m);
+  if (done) return done;
+  const f = FINISH[m.name];
   const std = m as MeshStandardMaterial;
-  if ("envMap" in std) {
-    std.envMap = envMap;
-    std.envMapIntensity = ENV[m.name] ?? 0.5;
+  if (!f || !("roughness" in std)) {
+    upgraded.set(m, m);
+    return m;
   }
-  if (m.name === "Shell") std.color = new Color(SHELL_COLOR);
-  softHighlights(m);
-  m.needsUpdate = true;
+  let out: MeshPhysicalMaterial;
+  if ((m as MeshPhysicalMaterial).isMeshPhysicalMaterial) {
+    out = m as MeshPhysicalMaterial;
+  } else {
+    // Keep every map and colour of the model's own material.
+    out = new MeshPhysicalMaterial();
+    // The standard copy carries every map and value; the clear coat is extra.
+    MeshStandardMaterial.prototype.copy.call(out, std);
+    out.name = m.name;
+  }
+  // Values the model already set (a clear coat, say) are kept.
+  if (f.roughness !== undefined && !std.roughnessMap)
+    out.roughness = f.roughness;
+  if (f.metalness !== undefined) out.metalness = f.metalness;
+  if (f.clearcoat !== undefined && out.clearcoat === 0) {
+    out.clearcoat = f.clearcoat;
+    out.clearcoatRoughness = f.clearcoatRoughness ?? 0.1;
+  }
+  if (f.color) out.color = new Color(f.color);
+  out.envMapIntensity = f.env;
+  out.needsUpdate = true;
+  upgraded.set(m, out);
+  return out;
 };
-/* eslint-enable no-param-reassign */
+
+/** Sets up a model's meshes: finishes, and casting / taking shadows. */
+export const dressModel = (root: Object3D, shadows = true) => {
+  root.traverse((o) => {
+    const mesh = o as Mesh;
+    if (!mesh.isMesh) return;
+    mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map(finish)
+      : finish(mesh.material);
+    mesh.castShadow = shadows;
+    mesh.receiveShadow = shadows;
+  });
+};

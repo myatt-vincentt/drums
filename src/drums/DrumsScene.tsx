@@ -1,32 +1,46 @@
-// Drums: a full 3D drum kit sits in front of you at the bottom of the
-// screen and a drumstick appears in each hand. Play it: strike down at a
-// drum or cymbal, nod for the kick, rest a stick on the hi-hat to close it.
-// A mouse or a finger plays it too. Free play, no score.
+// Drums: a full 3D drum kit in a recording studio, seen from the drummer's
+// seat, with two ghost hands holding drumsticks that follow your hands. Play
+// it: strike down over a drum or cymbal, nod for the kick, rest a stick on
+// the hi-hat to close it. A mouse or a finger plays it too. Free play, no
+// score. Your camera sits small in the corner.
 //
-//   Kit.tsx           the kit: placed, lit, beater and hi-hat moves, heads on screen
-//   Sticks.tsx        a stick in each tracked hand, and their hits
+//   CameraRig.tsx     the views (drummer, front, top), fitted to the screen
+//   Studio.tsx        the room and its light, day and night
+//   Kit.tsx           the kit: its layout, beater and hi-hat moves, heads
+//   GhostHands.tsx    the ghost hands and sticks, and their hits
+//   aim.ts            where a stick aims, and its stroke (pure)
 //   hits.ts           what counts as a hit (pure)
 //   hihat.ts          closing the hi-hat by holding still (pure)
 //   NodKick.tsx       the kick from a nod of the head (nod.ts)
 //   PointerInput.tsx  taps and clicks
+//   CameraFrame.tsx   your camera in the corner
+//   Hud.tsx           the view and light chips
 //   audio.ts          the recorded kit, played with Web Audio
 //   Sound.tsx         the wordless "tap for sound" speaker
 import { Suspense } from "react";
 
+import { CameraFrame } from "./CameraFrame";
+import { CameraRig } from "./CameraRig";
+import { GhostHands } from "./GhostHands";
+import { Hud } from "./Hud";
 import { Kit } from "./Kit";
 import { NodKick } from "./NodKick";
 import { PointerInput } from "./PointerInput";
 import { Sound } from "./Sound";
-import { Sticks } from "./Sticks";
+import { Studio } from "./Studio";
 
 export const DrumsScene = () => (
   <>
+    <CameraRig />
     <Suspense fallback={null}>
+      <Studio />
       <Kit />
-      <Sticks />
+      <GhostHands />
     </Suspense>
+    <CameraFrame />
     <NodKick />
     <PointerInput />
+    <Hud />
     <Sound />
   </>
 );

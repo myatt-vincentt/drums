@@ -191,8 +191,14 @@ export class StrokeDetector {
     this.low = Infinity;
   }
 
-  /** A fresh reading; returns the hit it makes, if any. */
-  push(s: StickSample, zones: readonly Zone[]): StrokeHit | null {
+  /**
+   * A fresh reading; returns the hit it makes, if any. `target` is the heads
+   * on screen, or a function that names the piece the stick is aimed at.
+   */
+  push(
+    s: StickSample,
+    target: readonly Zone[] | (() => PieceId | null),
+  ): StrokeHit | null {
     const p = this.prev;
     if (p && s.t <= p.t) return null;
     this.prev = s;
@@ -228,21 +234,26 @@ export class StrokeDetector {
       (before > STROKE.startSpeed * 0.35 || down > STROKE.startSpeed * 1.6);
     if (!stroke || s.t - this.lastHit < STROKE.minGap) return null;
 
-    const ahead = STROKE.lead * palm;
-    const zone = firstZoneOnPath(zones, [
-      p.x,
-      p.y,
-      s.x,
-      s.y,
-      s.x + vx * ahead,
-      s.y + vy * ahead,
-    ]);
-    if (!zone) return null;
+    let piece: PieceId | null;
+    if (typeof target === "function") piece = target();
+    else {
+      const ahead = STROKE.lead * palm;
+      piece =
+        firstZoneOnPath(target, [
+          p.x,
+          p.y,
+          s.x,
+          s.y,
+          s.x + vx * ahead,
+          s.y + vy * ahead,
+        ])?.id ?? null;
+    }
+    if (!piece) return null;
     this.armed = false;
     this.low = s.y;
     this.lastHit = s.t;
     return {
-      piece: zone.id,
+      piece,
       velocity: strokeVelocity(down),
       speed: down,
       t: s.t,

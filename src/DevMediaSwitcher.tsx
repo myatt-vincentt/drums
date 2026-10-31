@@ -6,8 +6,8 @@
 // works. In a browser without a camera (the built-in preview) it never shows,
 // so this fills exactly that gap: when the webcam fails it shows the SDK's
 // MediaSourceSwitcher with every SDK sample video and image and the webcam, and
-// starts on the SDK's "Person Looking" video. Nothing to
-// download first.
+// starts on the SDK's "Thumb Up" video (a person with a hand up, so the
+// corner camera shows a tracked hand). Nothing to download first.
 //
 // Optional: drop a clip at dev-media/drums.mp4 and it is listed first and
 // used as the start instead (git-ignored; see dev-media/README.md). It lives
@@ -28,6 +28,7 @@ import {
   useXRReady,
 } from "@vincentt-xr/sdk/low-level";
 
+import { pinToScreen } from "./drums/layout";
 import { streamFromImageUrl } from "./mediaStream";
 
 type Preset = {
@@ -71,8 +72,8 @@ const loadLocalClip = (): Promise<Preset | null> =>
     }))
     .catch(() => null);
 
-/** Without a local clip, start on this SDK sample: head and shoulders. */
-const SDK_START = "person_looking.mp4";
+/** Without a local clip, start on this SDK sample: a hand in view. */
+const SDK_START = "person_thumbUp.mp4";
 
 type CaptureCanvas = HTMLCanvasElement & {
   captureStream: (fps?: number) => MediaStream;
@@ -219,7 +220,13 @@ const DevMediaSwitcher = () => {
   return (
     // Full-screen but click-through: only the switcher itself takes taps, so
     // the HUD's buttons and the dev mouse still work under it.
-    <Html fullscreen zIndexRange={[40, 0]} style={{ pointerEvents: "none" }}>
+    // Pinned to the screen: the scene's camera moves.
+    <Html
+      fullscreen
+      calculatePosition={pinToScreen}
+      zIndexRange={[40, 0]}
+      style={{ pointerEvents: "none" }}
+    >
       <div style={{ pointerEvents: "auto" }}>
         <Switcher value={value} onChange={apply} sources={mod.sources} />
       </div>

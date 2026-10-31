@@ -21,7 +21,9 @@ export type Piece = {
   node: string;
   /** The empty at the head's centre; its +Y is the head's normal. */
   hitCenter: string;
-  /** Radius of the playable head or cymbal (model metres). */
+  /** The mesh that is the playing surface (its size is measured). */
+  surface: string;
+  /** Radius of the playable head or cymbal (m), if it can't be measured. */
   radius: number;
   /** Cymbals are hit at the bell, so the whole cymbal counts. */
   cymbal: boolean;
@@ -32,6 +34,7 @@ export const PIECES: Piece[] = [
     id: "kick",
     node: "Kick",
     hitCenter: "Kick_HitCenter",
+    surface: "Kick_Head",
     radius: 0.284,
     cymbal: false,
   },
@@ -39,6 +42,7 @@ export const PIECES: Piece[] = [
     id: "snare",
     node: "Snare",
     hitCenter: "Snare_HitCenter",
+    surface: "Snare_Head",
     radius: 0.157,
     cymbal: false,
   },
@@ -46,6 +50,7 @@ export const PIECES: Piece[] = [
     id: "tom1",
     node: "Tom1",
     hitCenter: "Tom1_HitCenter",
+    surface: "Tom1_Head",
     radius: 0.135,
     cymbal: false,
   },
@@ -53,6 +58,7 @@ export const PIECES: Piece[] = [
     id: "tom2",
     node: "Tom2",
     hitCenter: "Tom2_HitCenter",
+    surface: "Tom2_Head",
     radius: 0.181,
     cymbal: false,
   },
@@ -60,6 +66,7 @@ export const PIECES: Piece[] = [
     id: "hihat",
     node: "HiHat",
     hitCenter: "HiHat_HitCenter",
+    surface: "HiHat_Top",
     radius: 0.178,
     cymbal: true,
   },
@@ -67,6 +74,7 @@ export const PIECES: Piece[] = [
     id: "crash",
     node: "Crash",
     hitCenter: "Crash_HitCenter",
+    surface: "Crash_Cymbal",
     radius: 0.204,
     cymbal: true,
   },

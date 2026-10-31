@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Html } from "@react-three/drei";
 
 import { sound } from "./audio";
+import { pinToScreen } from "./layout";
 
 const SIZE = 44;
 
@@ -58,7 +59,12 @@ export const Sound = () => {
 
   if (gone) return null;
   return (
-    <Html fullscreen zIndexRange={[30, 0]} style={{ pointerEvents: "none" }}>
+    <Html
+      fullscreen
+      calculatePosition={pinToScreen}
+      zIndexRange={[30, 0]}
+      style={{ pointerEvents: "none" }}
+    >
       <style>{PULSE}</style>
       <div
         style={{

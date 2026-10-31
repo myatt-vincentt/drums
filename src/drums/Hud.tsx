@@ -1,0 +1,156 @@
+// The page UI, minimal, on glass, top right:
+//   - your camera (CameraFrame.tsx): tap it to tuck it away; a small camera
+//     button then sits in the corner to bring it back
+//   - under it, two chips: the view (a camera; each tap goes to the next
+//     view: drummer, front, top) and the studio light (sun / moon)
+import type { ReactNode } from "react";
+import { Html } from "@react-three/drei";
+import { useThree } from "@react-three/fiber";
+
+import { frameRect, GUTTER, pinToScreen, type View } from "./layout";
+import { drums, nextView, setNight, toggleCam, useDrumsVersion } from "./state";
+
+const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
+const ACCENT = "#f4d968";
+
+const CSS = `
+.dr-root { position: absolute; inset: 0; pointer-events: none; color: #fff;
+  -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+.dr-glass { background: rgb(35 37 40 / .64);
+  backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  border: 1px solid rgb(235 246 253 / .18);
+  box-shadow: inset 0 1px 1px rgb(255 255 255 / .22), 0 8px 24px rgb(0 0 0 / .22); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .dr-glass { background: rgb(35 37 40 / .82); } }
+.dr-chips { position: absolute; display: flex; gap: 8px; transition: top 350ms ${EASE}; }
+.dr-btn { pointer-events: auto; border: 0; padding: 0; margin: 0; color: inherit; position: relative;
+  display: grid; place-items: center; cursor: pointer; outline: none; touch-action: manipulation;
+  width: 44px; height: 44px; border-radius: 50%; transition: transform 160ms ease-out, opacity 300ms ${EASE}; }
+.dr-btn:active { transform: scale(0.94); }
+.dr-btn:focus-visible { box-shadow: 0 0 0 2px ${ACCENT}; }
+.dr-btn .dr-mark { position: absolute; bottom: -2px; right: -2px; width: 18px; height: 18px;
+  border-radius: 50%; background: ${ACCENT}; color: #232528; display: grid; place-items: center;
+  font: 700 10px/1 system-ui, -apple-system, sans-serif; }
+.dr-cam { position: absolute; pointer-events: auto; border: 0; padding: 0; margin: 0;
+  background: transparent; cursor: pointer; border-radius: 16px; outline: none; }
+.dr-cam:focus-visible { box-shadow: 0 0 0 2px ${ACCENT}; }
+.dr-show { position: absolute; right: ${GUTTER}px; top: ${GUTTER}px; }
+.dr-gone { opacity: 0; pointer-events: none; }
+`;
+
+const Icon = ({ children }: { children: ReactNode }) => (
+  <svg
+    viewBox="0 0 24 24"
+    width={20}
+    height={20}
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={1.8}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    {children}
+  </svg>
+);
+
+const CameraIcon = () => (
+  <Icon>
+    <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
+    <circle cx="12" cy="13" r="3.5" />
+  </Icon>
+);
+const ViewIcon = () => (
+  <Icon>
+    <path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z" />
+    <circle cx="12" cy="12" r="3" />
+  </Icon>
+);
+const SunIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" />
+  </Icon>
+);
+const MoonIcon = () => (
+  <Icon>
+    <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z" />
+  </Icon>
+);
+
+const VIEW_MARK: Record<View, string> = { drummer: "1", front: "2", top: "3" };
+const VIEW_NAME: Record<View, string> = {
+  drummer: "View: drummer's seat",
+  front: "View: front",
+  top: "View: top",
+};
+
+export const Hud = () => {
+  useDrumsVersion();
+  const width = useThree((s) => s.size.width);
+  const height = useThree((s) => s.size.height);
+  const frame = frameRect(width, height);
+  const hidden = drums.camHidden;
+  const chipsTop = hidden ? GUTTER + 44 + 10 : frame.top + frame.height + 10;
+
+  return (
+    <Html
+      fullscreen
+      calculatePosition={pinToScreen}
+      zIndexRange={[30, 0]}
+      style={{ pointerEvents: "none" }}
+    >
+      <style>{CSS}</style>
+      <div className="dr-root">
+        <button
+          type="button"
+          data-hud="camera"
+          className={`dr-cam ${hidden ? "dr-gone" : ""}`}
+          aria-label="Hide your camera"
+          style={{
+            left: frame.left,
+            top: frame.top,
+            width: frame.width,
+            height: frame.height,
+          }}
+          onClick={toggleCam}
+        />
+        <button
+          type="button"
+          data-hud="camera-show"
+          className={`dr-btn dr-glass dr-show ${hidden ? "" : "dr-gone"}`}
+          aria-label="Show your camera"
+          onClick={toggleCam}
+        >
+          <CameraIcon />
+        </button>
+        <div className="dr-chips" style={{ top: chipsTop, right: GUTTER }}>
+          <button
+            type="button"
+            data-hud="view"
+            className="dr-btn dr-glass"
+            aria-label={VIEW_NAME[drums.view]}
+            onClick={nextView}
+          >
+            <ViewIcon />
+            <span className="dr-mark">{VIEW_MARK[drums.view]}</span>
+          </button>
+          <button
+            type="button"
+            data-hud="light"
+            className="dr-btn dr-glass"
+            aria-label={
+              drums.night
+                ? "Night studio (tap for day)"
+                : "Day studio (tap for night)"
+            }
+            onClick={() => setNight(!drums.night)}
+          >
+            {drums.night ? <MoonIcon /> : <SunIcon />}
+          </button>
+        </div>
+      </div>
+    </Html>
+  );
+};

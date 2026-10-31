@@ -1,24 +1,25 @@
 // Playing with a mouse or a finger, no hands needed: tap or click a drum or
-// cymbal to hit it, anywhere else for the kick. Holding the button (or
-// finger) down on the hi-hat closes it, the same as resting a stick on it;
-// letting go opens it. The space bar plays the kick too.
+// cymbal and the nearer ghost stick swings onto it; tap anywhere else (or
+// press the space bar) for the kick. Holding the button (or finger) down on
+// the hi-hat closes it, the same as resting a stick on it; letting go opens
+// it. Works in every view.
 import { useEffect } from "react";
 import { useThree } from "@react-three/fiber";
-import { Raycaster, Vector2, type Object3D } from "three";
+import { Plane, Raycaster, Vector2, Vector3, type Object3D } from "three";
 
-import { zoneAt } from "./hits";
-import { isHardware, PIECES, type PieceId } from "./pieces";
 import { sound } from "./audio";
-import { drums, hatChanged, strike } from "./state";
+import { swingAt } from "./GhostHands";
+import { isHardware, PIECES, type PieceId } from "./pieces";
+import { drums, hatChanged, headOf, strike } from "./state";
 
 /** Loudness of a tap. */
 const TAP_VELOCITY = 0.72;
 /** A tap just beside a head (within this many radii) still hits it. */
-const NEAR = 1.08;
+const NEAR = 1.15;
 
 const NODES = new Map<string, PieceId>(PIECES.map((p) => [p.node, p.id]));
 
-/** Is this event on a control (a chip, the media switcher…), not the kit? */
+/** Is this event on a control (a chip, the camera, the media switcher…)? */
 const onControl = (e: Event) => {
   const el = e.target as HTMLElement | null;
   return !!el?.closest?.(
@@ -38,6 +39,9 @@ const pieceOf = (o: Object3D | null): PieceId | null => {
   return null;
 };
 
+const plane = new Plane();
+const onPlane = new Vector3();
+
 export const PointerInput = () => {
   const camera = useThree((s) => s.camera);
   const gl = useThree((s) => s.gl);
@@ -48,41 +52,58 @@ export const PointerInput = () => {
     const canvas = gl.domElement;
     let held = false;
 
-    /** Client pixels → screen heights (y up, centre origin), and NDC. */
-    const toScreen = (e: PointerEvent) => {
+    const setNdc = (e: PointerEvent) => {
       const r = canvas.getBoundingClientRect();
       ndc.set(
         ((e.clientX - r.left) / r.width) * 2 - 1,
         -(((e.clientY - r.top) / r.height) * 2 - 1),
       );
-      return { x: ndc.x * 0.5 * (r.width / r.height), y: ndc.y * 0.5 };
+      ray.setFromCamera(ndc, camera);
     };
 
-    const pick = (x: number, y: number): PieceId | null => {
+    /** The piece under the pointer and the point on its head. */
+    const pick = (): { id: PieceId; point: Vector3 } | null => {
+      let best: { id: PieceId; point: Vector3; q: number } | null = null;
       if (drums.root) {
-        ray.setFromCamera(ndc, camera);
         const hit = ray.intersectObject(drums.root, true)[0];
         const id = hit ? pieceOf(hit.object) : null;
-        if (id) return id;
+        const h = id ? headOf(id) : null;
+        if (id && h) {
+          plane.setFromNormalAndCoplanarPoint(h.normal, h.center);
+          const p = ray.ray.intersectPlane(plane, onPlane) ?? h.center;
+          return { id, point: p.clone() };
+        }
       }
-      // Thin cymbal edges and near misses: the head's ellipse on screen.
-      return zoneAt(drums.zones, x, y, NEAR)?.id ?? null;
+      // Thin cymbal edges and near misses: the nearest head's disc.
+      drums.heads.forEach((h) => {
+        if (h.id === "kick") return;
+        plane.setFromNormalAndCoplanarPoint(h.normal, h.center);
+        const p = ray.ray.intersectPlane(plane, onPlane);
+        if (!p) return;
+        const q = p.distanceTo(h.center) / h.radius;
+        if (q <= NEAR && (!best || q < best.q))
+          best = { id: h.id, point: p.clone(), q };
+      });
+      const b = best as { id: PieceId; point: Vector3 } | null;
+      return b ? { id: b.id, point: b.point } : null;
     };
 
     const onDown = (e: PointerEvent) => {
       if (onControl(e)) return;
       sound.unlock();
-      const p = toScreen(e);
-      const id = pick(p.x, p.y) ?? "kick";
+      setNdc(e);
+      const found = pick();
+      const id = found?.id ?? "kick";
       strike(id, TAP_VELOCITY + (Math.random() - 0.5) * 0.08, "pointer");
+      if (found && id !== "kick") swingAt(id, found.point);
       held = true;
-      Object.assign(drums.pointer, { present: true, x: p.x, y: p.y, speed: 0 });
-    };
-    const onMove = (e: PointerEvent) => {
-      if (!held) return;
-      const p = toScreen(e);
-      drums.pointer.x = p.x;
-      drums.pointer.y = p.y;
+      const onHat = id === "hihat" && found;
+      Object.assign(drums.pointer, {
+        present: !!onHat,
+        x: onHat ? found.point.x : 0,
+        y: onHat ? found.point.y : 0,
+        speed: 0,
+      });
     };
     const onUp = () => {
       if (!held) return;
@@ -97,13 +118,11 @@ export const PointerInput = () => {
       strike("kick", TAP_VELOCITY, "pointer");
     };
     window.addEventListener("pointerdown", onDown);
-    window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("pointerdown", onDown);
-      window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
       window.removeEventListener("keydown", onKey);
