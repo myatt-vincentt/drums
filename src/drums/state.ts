@@ -95,9 +95,16 @@ export const drums = {
   slow: false,
   session: null as Session | null,
   /** The last song's end (for the stars and the celebration). */
-  finish: null as { stars: number; at: number } | null,
+  finish: null as {
+    stars: number;
+    at: number;
+    id: string;
+    mode: "learn" | "play";
+    results: readonly (string | null)[];
+    offsets: readonly (number | null)[];
+  } | null,
   /** A song listening to the hits (set while one runs). */
-  songHit: null as ((piece: PieceId) => void) | null,
+  songHit: null as ((piece: PieceId, tracked: boolean) => void) | null,
   /** Your hands (and nods) play the kit. */
   handsOn: handsAtStart(),
   changed() {
@@ -174,7 +181,7 @@ export const strike = (
     by,
   });
   if (drums.log.length > 60) drums.log.shift();
-  drums.songHit?.(piece);
+  drums.songHit?.(piece, by === "left" || by === "right");
 };
 
 /** The hi-hat opened or closed: the foot's sound (the top cymbal follows). */

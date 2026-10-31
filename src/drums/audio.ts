@@ -50,6 +50,8 @@ export const meter = {
   loaded: 0,
   total: 0,
   unlocked: false,
+  /** The loudest sample sent out so far (1 = full scale). */
+  peak: 0,
   events: [] as Array<{
     t: number;
     sound: SoundId;
@@ -169,7 +171,12 @@ export const sound = {
     }
     analyser.getFloatTimeDomainData(wave as Float32Array<ArrayBuffer>);
     let sum = 0;
-    for (let i = 0; i < wave.length; i += 1) sum += wave[i] * wave[i];
+    let peak = 0;
+    for (let i = 0; i < wave.length; i += 1) {
+      sum += wave[i] * wave[i];
+      peak = Math.max(peak, Math.abs(wave[i]));
+    }
+    meter.peak = Math.max(meter.peak, peak);
     const rms = Math.sqrt(sum / wave.length);
     analyser.getByteFrequencyData(bins as Uint8Array<ArrayBuffer>);
     // The bins below about 150 Hz.

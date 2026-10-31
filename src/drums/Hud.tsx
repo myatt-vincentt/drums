@@ -11,7 +11,13 @@ import { Html } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 
 import { frameRect, GUTTER, pinToScreen, type View } from "./layout";
-import { startSong, stopSong } from "./SongPlayer";
+import {
+  bestStars,
+  nextSongId,
+  progressLine,
+  startSong,
+  stopSong,
+} from "./SongPlayer";
 import { CHARTS } from "./songs";
 import {
   drums,
@@ -67,6 +73,16 @@ const CSS = `
   display: flex; gap: 6px; padding: 12px 18px; border-radius: 22px; cursor: pointer;
   animation: dr-pop 420ms ${EASE} both; }
 @keyframes dr-pop { from { opacity: 0; transform: translate(-50%, 10px) scale(.92); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+.dr-progress { position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: rgb(255 255 255 / .12); }
+.dr-progress > div { height: 100%; background: ${ACCENT}; transform-origin: 0 50%;
+  transform: scaleX(0); box-shadow: 0 0 8px ${ACCENT}; }
+.dr-best { display: flex; gap: 1px; margin-right: 2px; }
+.dr-end { display: flex; align-items: center; gap: 10px; }
+.dr-end .dr-icon { pointer-events: auto; width: 36px; height: 36px; border-radius: 50%; border: 0;
+  background: rgb(255 255 255 / .1); color: #fff; display: grid; place-items: center; cursor: pointer;
+  transition: transform 160ms ease-out; }
+.dr-end .dr-icon:active { transform: scale(0.94); }
 .dr-show { position: absolute; right: ${GUTTER}px; top: ${GUTTER}px; }
 .dr-gone { opacity: 0; pointer-events: none; }
 `;
@@ -121,6 +137,26 @@ const Star = ({ on }: { on: boolean }) => (
     />
   </svg>
 );
+const AgainIcon = () => (
+  <Icon>
+    <path d="M4 12a8 8 0 1 0 2.4-5.7" />
+    <path d="M4 4v4.5h4.5" />
+  </Icon>
+);
+const NextIcon = () => (
+  <Icon>
+    <path d="M6 5.5l9 6.5-9 6.5z" fill="currentColor" />
+    <path d="M18 5v14" />
+  </Icon>
+);
+const SmallStar = ({ on }: { on: boolean }) => (
+  <svg viewBox="0 0 24 24" width={11} height={11} aria-hidden="true">
+    <path
+      d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"
+      fill={on ? ACCENT : "rgb(255 255 255 / .22)"}
+    />
+  </svg>
+);
 const ViewIcon = () => (
   <Icon>
     <path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z" />
@@ -163,6 +199,8 @@ export const Hud = () => {
   const width = useThree((s) => s.size.width);
   const height = useThree((s) => s.size.height);
   const frame = frameRect(width, height);
+  const tall = height > width;
+  const best = drums.songCard ? bestStars() : {};
   const hidden = drums.camHidden;
   const chipsTop = hidden ? GUTTER + 44 + 10 : frame.top + frame.height + 10;
 
@@ -252,11 +290,24 @@ export const Hud = () => {
           <div
             className="dr-card dr-glass"
             data-hud="song-card"
-            style={{ top: chipsTop + 54, right: GUTTER }}
+            // On a tall screen the card sits up in the room, clear of the kit.
+            style={
+              tall
+                ? { top: GUTTER + 48, left: GUTTER }
+                : { top: chipsTop + 54, right: GUTTER }
+            }
           >
             {CHARTS.map((c) => (
               <div className="dr-row" key={c.id}>
                 <span className="dr-title">{c.title}</span>
+                <span
+                  className="dr-best"
+                  aria-label={`Best: ${best[c.id] ?? 0} of 3 stars`}
+                >
+                  {[1, 2, 3].map((i) => (
+                    <SmallStar key={i} on={i <= (best[c.id] ?? 0)} />
+                  ))}
+                </span>
                 <button
                   type="button"
                   className="dr-small"
@@ -289,20 +340,50 @@ export const Hud = () => {
           </div>
         ) : null}
         {showStars && drums.finish ? (
-          <button
-            type="button"
+          <div
             data-hud="stars"
-            className="dr-stars dr-glass"
-            aria-label={`${drums.finish.stars} of 3 stars`}
-            onClick={() => {
-              drums.finish = null;
-              drums.changed();
-            }}
+            className="dr-stars dr-glass dr-end"
+            style={tall ? { top: frame.top + frame.height + 76 } : undefined}
           >
-            {[1, 2, 3].map((i) => (
-              <Star key={i} on={i <= (drums.finish?.stars ?? 0)} />
-            ))}
-          </button>
+            <span
+              className="dr-end"
+              style={{ gap: 4 }}
+              aria-label={`${drums.finish.stars} of 3 stars`}
+            >
+              {[1, 2, 3].map((i) => (
+                <Star key={i} on={i <= (drums.finish?.stars ?? 0)} />
+              ))}
+            </span>
+            <button
+              type="button"
+              className="dr-icon"
+              data-hud="again"
+              aria-label="Again"
+              onClick={() => startSong(drums.finish!.id, drums.finish!.mode)}
+            >
+              <AgainIcon />
+            </button>
+            <button
+              type="button"
+              className="dr-icon"
+              data-hud="next"
+              aria-label="Next"
+              onClick={() =>
+                startSong(nextSongId(drums.finish!.id), drums.finish!.mode)
+              }
+            >
+              <NextIcon />
+            </button>
+          </div>
+        ) : null}
+        {drums.session ? (
+          <div className="dr-progress" aria-hidden="true">
+            <div
+              ref={(el) => {
+                progressLine.el = el;
+              }}
+            />
+          </div>
         ) : null}
       </div>
     </Html>

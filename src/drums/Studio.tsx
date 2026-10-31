@@ -1,4 +1,6 @@
 // The recording studio around the kit, and its light, day and night.
+// Its decor: an ON AIR sign (lit while you play), a "vincentt.studio" neon,
+// an LED cove whose wash breathes with the music at night, and plants.
 //
 // The room's light is baked: its own lightmaps (day and night) light every
 // surface exactly as in the studio's renders, so the room itself takes no
@@ -50,7 +52,7 @@ const SWITCH = 0.9;
 /** Shadow map size by screen (phones get a smaller one). */
 const SHADOW = { desktop: 2048, phone: 1024 };
 /** The lightmaps' strength (they hold light ÷ this, π included). */
-const LIGHTMAP = { day: 6.241 * Math.PI, night: 10.633 * Math.PI };
+const LIGHTMAP = { day: 10.869 * Math.PI, night: 11.835 * Math.PI };
 
 type Glow = { color: [number, number, number]; strength: number };
 /** The glowing parts, day and night (as in the studio's renders). */
@@ -71,6 +73,33 @@ const GLOW: Record<string, { day: Glow; night: Glow }> = {
     day: { color: [0, 0, 0], strength: 0 },
     night: { color: [0.55, 0.25, 1.0], strength: 12 },
   },
+  // The "vincentt.studio" neon: soft by day, strong at night.
+  Neon: {
+    day: { color: [1.0, 0.8, 0.55], strength: 3 },
+    night: { color: [1.0, 0.8, 0.55], strength: 10 },
+  },
+  // The LED cove itself (its wash on the walls is in the room's surfaces).
+  LedCove: {
+    day: { color: [1.0, 0.86, 0.66], strength: 1.2 },
+    night: { color: [0.8, 0.72, 1.0], strength: 1.6 },
+  },
+};
+
+/** ON AIR: idle and lit (face and letters), and how long it stays lit (s). */
+const ON_AIR = {
+  idle: { face: [0.12, 0, 0], letters: [0.12, 0.1, 0.1] },
+  lit: { face: [1, 0.015, 0.01], letters: [1, 0.8, 0.72] },
+  strength: 1.8,
+  hold: 4,
+  fade: 0.8,
+};
+/**
+ * The cove's wash on the walls, on top of the bake (which already holds its
+ * steady glow): off by day; at night it breathes with the music.
+ */
+const COVE = {
+  day: { color: [1.0, 0.86, 0.66], strength: 0 },
+  night: { color: [0.8, 0.72, 1.0], strength: 0.05, music: 0.35 },
 };
 
 type Level = { day: number; night: number };
@@ -115,38 +144,10 @@ type Bake = {
   uDayI: { value: number };
   uNightI: { value: number };
   uNight: { value: number };
+  /** The LED cove's wash on the walls (a mask on the lightmap's layout). */
+  uCoveMask: { value: Texture | null };
+  uCove: { value: Color };
 };
-
-/**
- * The room's own soft light, as a floor under the bake: wherever the
- * lightmap is darker than this, this shows instead. By day a soft window-lit
- * fill; at night the LED strip's purple wash up the back wall, warm pools
- * from the ceiling cans and the lamp's glow. (Light before the surface's own
- * colour, in the renderer's units.)
- */
-const ROOM_FILL_GLSL = /* glsl */ `
-varying vec3 vRoomPos;
-uniform float uNight;
-vec3 drumsRoomFill(vec3 p) {
-  // Day: soft daylight, brighter towards the window wall (+x).
-  vec3 window = vec3(2.6, 1.65, 0.65);
-  float dw = length(p - window);
-  vec3 day = vec3(1.0, 0.96, 0.9) * 1.15 + vec3(1.0, 0.97, 0.92) * 1.4 / (1.0 + dw * dw * 0.35);
-  // Night: a dim base, the LED wash, the cans and the lamp.
-  vec3 night = vec3(0.05, 0.045, 0.07);
-  float back = smoothstep(1.2, 2.55, p.z);
-  night += vec3(0.55, 0.25, 1.0) * 2.4 * back * exp(-max(0.0, p.y - 0.12) / 0.55);
-  for (int i = 0; i < 6; i++) {
-    float x = float(i / 2) * 1.3 - 1.3;
-    float z = mod(float(i), 2.0) < 0.5 ? 1.5 : -0.3;
-    vec3 d = p - vec3(x, 2.97, z);
-    night += vec3(1.0, 0.86, 0.7) * 0.55 / (1.0 + dot(d, d) * 1.6);
-  }
-  vec3 dl = p - vec3(-2.05, 1.27, 1.25);
-  night += vec3(1.0, 0.66, 0.36) * 1.3 / (1.0 + dot(dl, dl) * 2.2);
-  return mix(day, night, uNight);
-}
-`;
 
 /** The speakers' motion, shared by the amps' surfaces. */
 type Speaker = {
@@ -178,6 +179,8 @@ const bakedMaterial = (
     opacity: src.opacity,
   });
   m.name = src.name;
+  // Leaves are cut out of their texture.
+  if (src.name.startsWith("Leaf")) m.alphaTest = 0.5;
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, bake);
     if (amp) Object.assign(shader.uniforms, amp.speaker);
@@ -193,28 +196,29 @@ const bakedMaterial = (
   }`
       : "";
     // eslint-disable-next-line no-param-reassign
-    shader.vertexShader = `varying vec3 vRoomPos;
-${amp ? "uniform float uLevel;\nuniform float uLow;\nuniform float uTime;" : ""}
-${shader.vertexShader
-  .replace("#include <begin_vertex>", `#include <begin_vertex>${move}`)
-  .replace(
-    "#include <project_vertex>",
-    `#include <project_vertex>
-  vRoomPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`,
-  )}`;
+    shader.vertexShader = `${amp ? "uniform float uLevel;\nuniform float uLow;\nuniform float uTime;" : ""}
+${shader.vertexShader.replace("#include <begin_vertex>", `#include <begin_vertex>${move}`)}`;
     // eslint-disable-next-line no-param-reassign
     shader.fragmentShader = `uniform sampler2D uNightMap;
 uniform float uDayI;
 uniform float uNightI;
-${ROOM_FILL_GLSL}
-${shader.fragmentShader.replace(
-  "reflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;",
-  `vec3 baked = mix(
+uniform float uNight;
+uniform sampler2D uCoveMask;
+uniform vec3 uCove;
+${shader.fragmentShader
+  .replace(
+    "reflectedLight.indirectDiffuse += lightMapTexel.rgb * lightMapIntensity * RECIPROCAL_PI;",
+    `reflectedLight.indirectDiffuse += mix(
     texture2D( lightMap, vLightMapUv ).rgb * uDayI,
     texture2D( uNightMap, vLightMapUv ).rgb * uNightI,
-    uNight ) * RECIPROCAL_PI;
-  reflectedLight.indirectDiffuse += max( baked, drumsRoomFill( vRoomPos ) );`,
-)}`;
+    uNight ) * RECIPROCAL_PI;`,
+  )
+  .replace(
+    "vec3 outgoingLight = reflectedLight.indirectDiffuse;",
+    `vec3 outgoingLight = reflectedLight.indirectDiffuse;
+  // The LED cove's wash (it glows, whatever the surface's colour).
+  outgoingLight += texture2D( uCoveMask, vLightMapUv ).r * uCove;`,
+  )}`;
   };
   m.customProgramCacheKey = () =>
     amp
@@ -225,9 +229,10 @@ ${shader.fragmentShader.replace(
 
 export const Studio = () => {
   const { scene: model } = useGLTF(MODELS.studio);
-  const [dayMap, nightMap] = useLoader(TextureLoader, [
+  const [dayMap, nightMap, coveMask] = useLoader(TextureLoader, [
     MODELS.lightmapDay,
     MODELS.lightmapNight,
+    MODELS.coveMask,
   ]);
   const [envDay, envNight] = useLoader(RGBELoader, [
     MODELS.envDay,
@@ -242,7 +247,7 @@ export const Studio = () => {
   }
 
   const bake = useMemo<Bake>(() => {
-    [dayMap, nightMap].forEach((t) => {
+    [dayMap, nightMap, coveMask].forEach((t) => {
       /* eslint-disable no-param-reassign */
       t.colorSpace = SRGBColorSpace;
       t.flipY = false;
@@ -255,8 +260,10 @@ export const Studio = () => {
       uDayI: { value: LIGHTMAP.day },
       uNightI: { value: LIGHTMAP.night },
       uNight: { value: drums.night ? 1 : 0 },
+      uCoveMask: { value: coveMask },
+      uCove: { value: new Color(0, 0, 0) },
     };
-  }, [dayMap, nightMap]);
+  }, [dayMap, nightMap, coveMask]);
 
   const speaker = useMemo<Speaker>(
     () => ({ uLevel: { value: 0 }, uLow: { value: 0 }, uTime: { value: 0 } }),
@@ -274,10 +281,17 @@ export const Studio = () => {
       mesh.receiveShadow = false;
       mesh.castShadow = false;
       const src = mesh.material as MeshStandardMaterial;
-      if (GLOW[mesh.name]) {
-        const m = new MeshBasicMaterial({ color: "#000000" });
-        mesh.material = m;
-        glowing[mesh.name] = [...(glowing[mesh.name] ?? []), m];
+      // Glowing parts are unlit, their own colour (by material).
+      const mats = Array.isArray(mesh.material)
+        ? mesh.material
+        : [mesh.material];
+      if (mats.every((mt) => GLOW[mt.name] || mt.name.startsWith("OnAir"))) {
+        const made2 = mats.map((mt) => {
+          const m = new MeshBasicMaterial({ color: "#000000", side: mt.side });
+          glowing[mt.name] = [...(glowing[mt.name] ?? []), m];
+          return m;
+        });
+        mesh.material = Array.isArray(mesh.material) ? made2 : made2[0];
         return;
       }
       // The amps move with the sound: their own materials.
@@ -456,6 +470,41 @@ export const Studio = () => {
         n.color[2] * n.strength,
       );
       glow[name]?.forEach((m) => m.color.copy(tmp.a).lerp(tmp.b, k));
+    });
+    // The music's pulse (at night the cove breathes with it).
+    const beat = Math.min(1.5, 0.5 * lv.level + 0.8 * lv.low);
+    const cove = glow.LedCove ?? [];
+    cove.forEach((m) => m.color.multiplyScalar(1 + 0.6 * beat * k));
+    const cd = COVE.day;
+    const cn = COVE.night;
+    bake.uCove.value
+      .setRGB(cd.color[0], cd.color[1], cd.color[2])
+      .multiplyScalar(cd.strength)
+      .lerp(
+        tmp.b
+          .setRGB(cn.color[0], cn.color[1], cn.color[2])
+          .multiplyScalar(cn.strength + cn.music * beat),
+        k,
+      );
+    // ON AIR: lit while you play (and all through Play), fading after a
+    // few quiet seconds; it flashes when a song ends.
+    const lastHit = Math.max(...Object.values(drums.hitAt)) / 1000;
+    const quiet = performance.now() / 1000 - lastHit;
+    let lit =
+      drums.session?.mode === "play"
+        ? 1
+        : 1 - Math.min(1, Math.max(0, (quiet - ON_AIR.hold) / ON_AIR.fade));
+    if (drums.finish) {
+      const e = (performance.now() - drums.finish.at) / 1000;
+      if (e < 1.6) lit = Math.floor(e / 0.2) % 2 === 0 ? 1 : 0.15;
+    }
+    (["face", "letters"] as const).forEach((part) => {
+      const idle = ON_AIR.idle[part];
+      const on = ON_AIR.lit[part];
+      tmp.a.setRGB(idle[0], idle[1], idle[2]);
+      tmp.b.setRGB(on[0], on[1], on[2]).multiplyScalar(ON_AIR.strength);
+      const list = glow[part === "face" ? "OnAirFace" : "OnAirLetters"] ?? [];
+      list.forEach((m) => m.color.copy(tmp.a).lerp(tmp.b, lit));
     });
 
     // The kit's light and reflections.

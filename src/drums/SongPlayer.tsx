@@ -32,9 +32,9 @@ import { sound } from "./audio";
 import { easeOut } from "./fx";
 import type { PieceId } from "./pieces";
 import { COUNT_IN_BARS, Session, type Mode } from "./session";
-import { chartById, type Chart } from "./songs";
+import { CHARTS, chartById, type Chart } from "./songs";
 import { drums, headOf } from "./state";
-import { playTone, type Voice } from "./synth";
+import { playTone, type ToneHandle, type Voice } from "./synth";
 
 /** Play's slower speed. */
 export const SLOW = 0.75;
@@ -70,7 +70,53 @@ const cuesOf = (chart: Chart): Cue[] => {
   ].sort((a, b) => a.beat - b.beat);
 };
 
-const player = { cues: [] as Cue[], next: 0 };
+const player = {
+  cues: [] as Cue[],
+  next: 0,
+  /** Notes sounding or due (so a stop or a pause can cut them). */
+  voices: [] as ToneHandle[],
+};
+
+/** Cuts every backing note now, and rewinds to what is still to come. */
+const cutBacking = (now: number) => {
+  player.voices.forEach((v) => v.cut(now));
+  player.voices = [];
+  const s = drums.session;
+  if (!s) return;
+  const i = player.cues.findIndex((c) => c.beat > s.beat - 1e-6);
+  player.next = i < 0 ? player.cues.length : i;
+};
+
+/** Each song's best stars this visit (Play only). */
+const BEST_KEY = "drums.best";
+export const bestStars = (): Record<string, number> => {
+  try {
+    return JSON.parse(
+      window.sessionStorage.getItem(BEST_KEY) ?? "{}",
+    ) as Record<string, number>;
+  } catch {
+    return {};
+  }
+};
+const saveBest = (id: string, stars: number) => {
+  try {
+    const best = bestStars();
+    if ((best[id] ?? 0) >= stars) return;
+    best[id] = stars;
+    window.sessionStorage.setItem(BEST_KEY, JSON.stringify(best));
+  } catch {
+    // private mode: not remembered
+  }
+};
+
+/** The bottom progress line (set by the page UI). */
+export const progressLine: { el: HTMLElement | null } = { el: null };
+
+/**
+ * A tracked stroke is read before the stick reaches the head (that hides
+ * the camera's delay); its moment is taken as the contact this much later.
+ */
+export const STROKE_TO_CONTACT = 0;
 
 /** Starts a song (from a tap: it also starts the sound). */
 export const startSong = (id: string, mode: Mode) => {
@@ -92,8 +138,16 @@ export const startSong = (id: string, mode: Mode) => {
 };
 
 export const stopSong = () => {
+  const a = sound.audio();
+  cutBacking(a?.ctx.currentTime ?? 0);
   drums.session = null;
   drums.changed();
+};
+
+/** The next song or beat in the list after `id`. */
+export const nextSongId = (id: string) => {
+  const i = CHARTS.findIndex((c) => c.id === id);
+  return CHARTS[(i + 1) % CHARTS.length].id;
 };
 
 // ---------------------------------------------------------------- looks
@@ -231,7 +285,7 @@ export const SongPlayer = () => {
     const pts = new Points(
       geo,
       new PointsMaterial({
-        size: 0.035,
+        size: 0.022,
         vertexColors: true,
         transparent: true,
         depthWrite: false,
@@ -241,8 +295,9 @@ export const SongPlayer = () => {
     pts.frustumCulled = false;
     pts.visible = false;
     const seeds = Array.from({ length: CONFETTI }, () => ({
+      // Over the kit and the room beyond it (never right at the camera).
       x: (Math.random() - 0.5) * 2.4,
-      z: (Math.random() - 0.5) * 1.8 - 0.1,
+      z: -0.5 + Math.random() * 1.6,
       y: 2.2 + Math.random() * 0.9,
       vx: (Math.random() - 0.5) * 0.4,
       vz: (Math.random() - 0.5) * 0.4,
@@ -253,12 +308,42 @@ export const SongPlayer = () => {
   }, []);
 
   useEffect(() => {
-    drums.songHit = (piece) => {
+    drums.songHit = (piece, tracked) => {
       const s = drums.session;
       const a = sound.audio();
-      if (s && a) s.hit(piece, a.ctx.currentTime);
+      if (s && a)
+        s.hit(piece, a.ctx.currentTime + (tracked ? STROKE_TO_CONTACT : 0));
     };
+    // Hiding the page pauses the song and its backing; coming back goes on
+    // after a one-bar count-in.
+    const onVisible = () => {
+      const s = drums.session;
+      const a = sound.audio();
+      if (!s || !a) return;
+      const t = a.ctx.currentTime;
+      if (document.hidden) {
+        s.pause(t);
+        cutBacking(t);
+      } else if (s.paused) {
+        const bpb = s.chart.beatsPerBar;
+        s.resume(t, bpb * s.secondsPerBeat);
+        for (let i = 0; i < bpb; i += 1)
+          player.voices.push(
+            playTone(
+              a.ctx,
+              a.out,
+              i === 0 ? "accent" : "click",
+              0,
+              t + i * s.secondsPerBeat,
+              0.05,
+              1,
+            ),
+          );
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
+      document.removeEventListener("visibilitychange", onVisible);
       drums.songHit = null;
     };
   }, []);
@@ -278,16 +363,25 @@ export const SongPlayer = () => {
         player.cues[player.next].beat < horizon
       ) {
         const c = player.cues[player.next];
-        playTone(
-          a.ctx,
-          a.out,
-          c.voice,
-          c.midi,
-          s.timeOf(c.beat, t),
-          c.length * s.secondsPerBeat,
-          c.velocity,
+        player.voices.push(
+          playTone(
+            a.ctx,
+            a.out,
+            c.voice,
+            c.midi,
+            s.timeOf(c.beat, t),
+            c.length * s.secondsPerBeat,
+            c.velocity,
+          ),
         );
         player.next += 1;
+      }
+      player.voices = player.voices.filter((v) => v.end > t);
+      // How far through the song.
+      if (progressLine.el) {
+        const into = COUNT_IN_BARS * s.chart.beatsPerBar;
+        const k = (s.beat + into) / (s.chart.bars * s.chart.beatsPerBar + into);
+        progressLine.el.style.transform = `scaleX(${Math.min(1, Math.max(0, k)).toFixed(4)})`;
       }
       // Answers to the hits.
       s.events.forEach((e) => {
@@ -303,7 +397,15 @@ export const SongPlayer = () => {
       s.events.length = 0;
       // The end: stars, a big hit, confetti.
       if (s.done) {
-        drums.finish = { stars: s.stars, at: nowMs };
+        drums.finish = {
+          stars: s.stars,
+          at: nowMs,
+          id: s.chart.id,
+          mode: s.mode,
+          results: s.results,
+          offsets: s.offsets,
+        };
+        if (s.mode === "play") saveBest(s.chart.id, s.stars);
         drums.session = null;
         sound.play("crash", 0.95);
         sound.play("kick", 1);

@@ -154,4 +154,21 @@ describe("session", () => {
     s.update(1000);
     expect(s.done).toBe(true);
   });
+
+  it("pauses where it is and goes on after a count-in", () => {
+    const s = new Session(rock, "play", 1, 0);
+    s.update(countIn + 1 * spb);
+    const at = s.beat;
+    s.pause(countIn + 1 * spb);
+    s.update(countIn + 50);
+    expect(s.beat).toBeCloseTo(at);
+    expect(s.results.filter((r) => r === "miss").length).toBeLessThan(4);
+    const bar = rock.beatsPerBar * spb;
+    s.resume(100, bar);
+    s.update(100 + bar / 2);
+    expect(s.beat).toBeCloseTo(at);
+    expect(s.timeOf(at + 1, 100 + bar / 2)).toBeCloseTo(100 + bar + spb);
+    s.update(100 + bar + spb);
+    expect(s.beat).toBeCloseTo(at + 1);
+  });
 });

@@ -29,6 +29,7 @@ const DevDebug = () => {
       camera,
       /** The output's level and low end right now (what moves the speakers). */
       levels: () => ({ ...sound.levels(0) }),
+      audio: () => sound.audio(),
       meter,
       head,
       ghosts,

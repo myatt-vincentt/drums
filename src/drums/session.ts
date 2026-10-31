@@ -54,6 +54,9 @@ export class Session {
   /** Each note's result (Learn: "good" once played). */
   readonly results: (Judgement | null)[];
 
+  /** Play: how far off each judged hit landed (s, + late). */
+  readonly offsets: (number | null)[];
+
   /** The next note to play (Learn) / the earliest not yet judged (Play). */
   next = 0;
 
@@ -65,7 +68,13 @@ export class Session {
   /** Judgements not yet shown (the caller drains them). */
   events: JudgeEvent[] = [];
 
+  /** Paused (the tab is hidden): the song stands still. */
+  paused = false;
+
   private last: number;
+
+  /** After a pause the song stands still until here (a count-in). */
+  private holdUntil = -Infinity;
 
   private readonly spb: number;
 
@@ -75,6 +84,7 @@ export class Session {
     this.speed = mode === "learn" ? 1 : speed;
     this.spb = secondsPerBeat(chart, this.speed);
     this.results = chart.notes.map(() => null);
+    this.offsets = chart.notes.map(() => null);
     this.beat = -COUNT_IN_BARS * chart.beatsPerBar;
     this.last = now;
   }
@@ -100,12 +110,26 @@ export class Session {
 
   /** The audio time of a beat (from the song's position now). */
   timeOf(beat: number, now: number) {
-    return now + (beat - this.beat) * this.spb;
+    return Math.max(now, this.holdUntil) + (beat - this.beat) * this.spb;
+  }
+
+  /** Stops the song where it is. */
+  pause(now: number) {
+    this.update(now);
+    this.paused = true;
+  }
+
+  /** Goes on after `countIn` seconds (the caller plays a count-in). */
+  resume(now: number, countIn: number) {
+    this.paused = false;
+    this.last = now;
+    this.holdUntil = now + countIn;
   }
 
   /** Moves the song on to `now`. */
   update(now: number) {
-    const dt = Math.max(0, now - this.last);
+    const from = Math.max(this.last, this.holdUntil);
+    const dt = this.paused ? 0 : Math.max(0, now - from);
     this.last = now;
     if (this.done) return;
     this.beat = Math.min(this.limit, this.beat + dt / this.spb);
@@ -169,6 +193,7 @@ export class Session {
     const result = judge(bestOff);
     if (result === "miss") return null;
     this.results[best] = result;
+    this.offsets[best] = bestOff;
     this.events.push({ index: best, piece, result, at: now });
     return result;
   }

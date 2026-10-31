@@ -6,9 +6,34 @@ export type Voice = "melody" | "bass" | "click" | "accent";
 
 const freq = (midi: number) => 440 * 2 ** ((midi - 69) / 12);
 
-const LEVEL = { melody: 0.11, bass: 0.3, click: 0.05, accent: 0.075 };
+/** The backing sits under the drums: the kit leads. */
+const LEVEL = { melody: 0.065, bass: 0.19, click: 0.04, accent: 0.06 };
 
-/** Plays one note at audio time `when` for `length` seconds. */
+/** A playing note, which can be cut short (a stop, a pause). */
+export type ToneHandle = { end: number; cut: (at: number) => void };
+
+/** Plays one note at audio time `when` for `length` seconds. Slow play
+ * changes only when notes start and how long they last, never their pitch. */
+/** Fades a note out fast and stops it (no hanging notes, no click). */
+const cutNow = (
+  c: AudioContext,
+  g: GainNode,
+  sources: AudioScheduledSourceNode[],
+  at: number,
+) => {
+  const t = Math.max(c.currentTime, at);
+  g.gain.cancelScheduledValues(t);
+  g.gain.setValueAtTime(g.gain.value, t);
+  g.gain.setTargetAtTime(0, t, 0.015);
+  sources.forEach((o) => {
+    try {
+      o.stop(t + 0.1);
+    } catch {
+      // already stopped
+    }
+  });
+};
+
 export const playTone = (
   c: AudioContext,
   out: AudioNode,
@@ -17,7 +42,7 @@ export const playTone = (
   when: number,
   length: number,
   velocity = 0.8,
-) => {
+): ToneHandle => {
   const at = Math.max(c.currentTime, when);
   const g = c.createGain();
   g.gain.value = 0;
@@ -36,7 +61,7 @@ export const playTone = (
     g.gain.setTargetAtTime(0, at + 0.004, 0.012);
     o.start(at);
     o.stop(at + 0.08);
-    return;
+    return { end: at + 0.08, cut: (t) => cutNow(c, g, [o], t) };
   }
   if (voice === "melody") {
     // Two soft saws a few cents apart and a triangle, through a warm filter.
@@ -92,4 +117,5 @@ export const playTone = (
     o.start(at);
     o.stop(end + 0.5);
   });
+  return { end: end + 0.5, cut: (t) => cutNow(c, g, stops, t) };
 };

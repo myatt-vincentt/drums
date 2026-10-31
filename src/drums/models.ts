@@ -8,6 +8,8 @@ export const MODELS = {
   studio: "/models/studio.glb",
   lightmapDay: "/models/studio-lightmap-day.webp",
   lightmapNight: "/models/studio-lightmap-night.webp",
+  /** Where the LED cove washes the walls (on the lightmaps' layout). */
+  coveMask: "/models/studio-cove-mask.webp",
   envDay: "/models/studio-env-day.hdr",
   envNight: "/models/studio-env-night.hdr",
 };
