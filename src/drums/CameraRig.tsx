@@ -33,8 +33,27 @@ const newPose = (): CameraPose => ({
 /** Development only: a fixed camera instead of the views (null = the views). */
 export const cameraOverride: { pose: CameraPose | null } = { pose: null };
 
+/**
+ * The Front view also keeps the wall behind the kit in the shot: the ON AIR
+ * sign, the neon under it and the two plants either side.
+ */
+const FRONT_WALL = [
+  [-0.3, 2.64, -2.34],
+  [0.3, 2.64, -2.34],
+  [-0.7, 1.88, -2.34],
+  [0.7, 1.88, -2.34],
+  [-1.95, 1.15, -1.9],
+  [-1.95, 0.05, -1.5],
+  [1.85, 1.78, -1.9],
+  [1.85, 0.05, -1.6],
+  // …and the whole kit, down to its feet.
+  [-0.85, 0, 0.35],
+  [0.85, 0, 0.35],
+  [0, 0, 0.5],
+].map(([x, y, z]) => new Vector3(x, y, z));
+
 const probe = new PerspectiveCamera();
-const pts = Array.from({ length: 40 }, () => new Vector3());
+const pts = Array.from({ length: 50 }, () => new Vector3());
 const local: Vector3[] = [];
 
 /** A view's pose for this screen, widened to fit the kit. */
@@ -54,6 +73,11 @@ const fittedPose = (view: View, aspect: number, out: CameraPose) => {
     pts[n + 4].set(h.center.x, h.center.y, h.center.z - r);
     n += 5;
   });
+  if (view === "front")
+    FRONT_WALL.forEach((p) => {
+      pts[n].copy(p);
+      n += 1;
+    });
   local.length = n;
   for (let i = 0; i < n; i += 1)
     local[i] = pts[i].applyMatrix4(probe.matrixWorldInverse);

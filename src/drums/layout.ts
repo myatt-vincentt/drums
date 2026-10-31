@@ -53,8 +53,8 @@ const DRUMMER = {
   phone: { pos: [0, 1.55, -1.3], target: [0, 1.12, 0.42], hfov: 62 },
 };
 const FRONT = {
-  laptop: { pos: [0, 1.3, 2.25], target: [0, 0.78, -0.1], vfov: 46 },
-  phone: { pos: [0, 1.4, 1.75], target: [0, 0.78, -0.1], hfov: 66 },
+  laptop: { pos: [0, 1.3, 2.35], target: [0, 0.85, -0.6], vfov: 54 },
+  phone: { pos: [0, 1.35, 2.35], target: [0, 1.0, -0.6], hfov: 66 },
 };
 const TOP = {
   laptop: { pos: [0, 2.75, -0.45], target: [0, 0.6, 0.0], vfov: 46 },
