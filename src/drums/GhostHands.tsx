@@ -22,13 +22,21 @@ import {
   useXRModelNode,
   type XRModelNodeHandTracking,
 } from "@vincentt-xr/sdk/low-level";
-import { Ray, Vector3, type Object3D } from "three";
+import {
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  Ray,
+  Vector3,
+  type Object3D,
+} from "three";
 // eslint-disable-next-line import/extensions
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 
 import { aimAlong, AimHold, type Aim } from "./aim";
 import { ghostMaterial, placeGhost, readGhost, type Ghost } from "./ghost";
 import type { HatInput } from "./hihat";
+import { whack, WHACK_LENGTH } from "./fx";
 import { StrokeDetector } from "./hits";
 import { dressModel } from "./look";
 import { MODELS } from "./models";
@@ -42,6 +50,8 @@ useGLTF.preload(MODELS.ghostRight);
 const HAND_FPS = 30;
 /** The tip hovers this far above the head between strokes (m). */
 const HOVER = 0.16;
+/** Over a cymbal the tip hovers lower, so the hand stays near it. */
+const HOVER_CYMBAL = 0.07;
 /** The stick's slope at rest, tip lower than the hand (radians). */
 const REST_SLOPE = 0.55;
 /**
@@ -77,11 +87,8 @@ const REST: Record<Side, PieceId> = { left: "snare", right: "tom2" };
 const HAND_BOX = { x0: -0.75, x1: 0.75, y0: -0.75, y1: 0.25 };
 /** The kit's playing area is widened by this share on each side. */
 const KIT_PAD = 0.18;
-/** A tap's swing: down to the head, then back up (s). */
+/** A tap's swing down to the head (s); then the whack and rebound (fx.ts). */
 const SWING_DOWN = 0.05;
-const SWING_UP = 0.2;
-/** After a hit the stick touches the head this long (s), then lifts. */
-const WHACK = 0.16;
 /** The wrist's part in a stroke: from this tilt (rad), full over this, at most this much. */
 const WRIST = { from: 0.08, full: 0.5, most: 0.6 };
 /** The smallest hand size used for speeds (screen heights). */
@@ -105,9 +112,15 @@ type GhostState = {
   tracked: boolean;
   palm: number;
   /** A tap's swing at a piece. */
-  swing: { piece: PieceId; point: Vector3; at: number } | null;
+  swing: {
+    piece: PieceId;
+    point: Vector3;
+    at: number;
+    velocity: number;
+  } | null;
   /** performance.now() of the last hit (the whack). */
   hitAt: number;
+  hitV: number;
   hat: HatInput;
   /** The wrist's tilt (knuckles up, radians) and its slow average. */
   tilt: number;
@@ -145,6 +158,7 @@ const newState = (side: Side): GhostState => ({
   palm: 0,
   swing: null,
   hitAt: -1e9,
+  hitV: 0,
   hat: { id: side, present: false, x: 0, y: 0, speed: 0 },
   tilt: 0,
   tiltBase: Number.NaN,
@@ -159,7 +173,7 @@ export const ghosts: Record<Side, GhostState> = {
 };
 
 /** A tap on a piece: the nearer ghost swings onto it. */
-export const swingAt = (piece: PieceId, point: Vector3) => {
+export const swingAt = (piece: PieceId, point: Vector3, velocity = 0.7) => {
   const now = performance.now();
   const dist = (s: Side) => ghosts[s].point.distanceTo(point);
   let side: Side = dist("left") <= dist("right") ? "left" : "right";
@@ -167,7 +181,7 @@ export const swingAt = (piece: PieceId, point: Vector3) => {
   // Quick taps alternate hands, like a roll.
   const busy = ghosts[side].swing && now - ghosts[side].swing!.at < 120;
   if (busy) side = other;
-  ghosts[side].swing = { piece, point: point.clone(), at: now };
+  ghosts[side].swing = { piece, point: point.clone(), at: now, velocity };
 };
 
 const ease = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
@@ -179,9 +193,18 @@ const flat = new Vector3();
 const dir = new Vector3();
 const grip = new Vector3();
 const back = new Vector3();
-const UP = new Vector3(0, 1, 0);
 const proj = new Vector3();
 const aimTarget = new Vector3();
+const hitPoint = new Vector3();
+const tipNow = new Vector3();
+/** The stick's trail: copies, their colour and opacities, and the tip speeds (m/s) it shows from and is full at. */
+const TRAIL = {
+  copies: 3,
+  color: "#f3dcb8",
+  opacity: [0.32, 0.18, 0.08],
+  from: 1.6,
+  full: 3,
+};
 
 /** The kit's playing area on the seat's view (NDC box of the stick pieces). */
 const kitBox = { x0: -0.6, x1: 0.6, y0: -0.8, y1: 0.1 };
@@ -239,6 +262,7 @@ const aimFrom = (x: number, y: number, out: Aim) => {
 /* eslint-enable no-param-reassign */
 
 const probe = new Vector3();
+const tipAt = new Vector3();
 
 /** How far a point must rise to clear every piece (m). */
 const liftToClear = (p: Vector3) => {
@@ -262,7 +286,13 @@ const poseStick = (st: GhostState, side: Side, stroke: number) => {
   if (!g) return;
   const L = g.tipLength;
   // The tip at rest, hovering over the aim point.
-  const rest = tmp.copy(st.point).addScaledVector(st.normal, HOVER);
+  const cymbal =
+    st.aim.piece === "hihat" ||
+    st.aim.piece === "crash" ||
+    st.swing?.piece === "hihat" ||
+    st.swing?.piece === "crash";
+  const hover = cymbal ? HOVER_CYMBAL : HOVER;
+  const rest = tmp.copy(st.point).addScaledVector(st.normal, hover);
   flat.copy(rest).sub(ANCHOR[side]);
   flat.y = 0;
   if (flat.lengthSq() < 1e-6) flat.set(0, 0, 1);
@@ -305,12 +335,16 @@ const poseStick = (st: GhostState, side: Side, stroke: number) => {
     });
     grip.y += clear;
   }
-  // …and the stick pivots in the grip until the tip meets the head.
-  const targetY =
-    rest.y - HOVER * Math.min(1, stroke) - 0.01 * Math.max(0, stroke - 1);
-  const sinA = Math.min(0.99, Math.max(0.05, (grip.y - targetY) / L));
-  const cosA = Math.sqrt(1 - sinA * sinA);
-  dir.copy(flat).multiplyScalar(cosA).addScaledVector(UP, -sinA).normalize();
+  // …and the stick swings down onto the aim point: it points at where the
+  // tip must be, and the hand slides along it so the tip lands right there.
+  tipAt
+    .copy(st.point)
+    .addScaledVector(
+      st.normal,
+      hover * (1 - Math.min(1, stroke)) - 0.004 * Math.max(0, stroke - 1),
+    );
+  dir.copy(tipAt).sub(grip).normalize();
+  grip.copy(tipAt).addScaledVector(dir, -L);
   // Palms down, the backs of the hands turned a little outwards.
   back.set(side === "left" ? 0.45 : -0.45, 1, 0).normalize();
   placeGhost(g, grip, dir, back);
@@ -351,6 +385,39 @@ export const GhostHands = () => {
     return out;
   }, [leftGltf, rightGltf]);
   const started = useRef(false);
+  // The stick's motion trail: faint copies at its last few places, shown
+  // only while it moves fast (a stroke).
+  const trails = useMemo(() => {
+    const make = (g: Ghost) => {
+      const stick = g.root.getObjectByName("Drumstick") as Mesh | undefined;
+      const tip = g.root.getObjectByName("Drumstick_Tip");
+      const copies = Array.from({ length: TRAIL.copies }, () => {
+        const m = new Mesh(
+          stick?.geometry,
+          new MeshBasicMaterial({
+            color: TRAIL.color,
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+          }),
+        );
+        m.matrixAutoUpdate = false;
+        m.frustumCulled = false;
+        m.visible = false;
+        return m;
+      });
+      return {
+        stick,
+        tip,
+        copies,
+        past: Array.from({ length: TRAIL.copies + 1 }, () => new Matrix4()),
+        lastTip: new Vector3(),
+        speed: 0,
+        filled: 0,
+      };
+    };
+    return { left: make(models.left), right: make(models.right) };
+  }, [models]);
 
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.1);
@@ -451,7 +518,13 @@ export const GhostHands = () => {
           aimFrom(st.hold.x, st.hold.y, st.aim);
           if (hit) {
             st.hitAt = nowMs;
-            strike(hit.piece, hit.velocity, side);
+            st.hitV = hit.velocity;
+            strike(
+              hit.piece,
+              hit.velocity,
+              side,
+              playPoint(hit.piece, side, st.aim.point, hitPoint),
+            );
           }
         }
       } else if (nowMs - st.lastSeen > 250) {
@@ -486,28 +559,55 @@ export const GhostHands = () => {
       const targetNormal = st.aim.normal;
       if (st.swing) {
         const e = (nowMs - st.swing.at) / 1000;
-        if (e > SWING_DOWN + SWING_UP + 0.25) st.swing = null;
+        if (e > SWING_DOWN + WHACK_LENGTH + 0.1) st.swing = null;
         else {
           const h = headOf(st.swing.piece);
           playPoint(st.swing.piece, side, st.swing.point, target);
           if (h) targetNormal.copy(h.normal);
-          stroke = Math.max(
-            stroke,
+          // Down onto the head, then the same whack and rebound as a stroke.
+          stroke =
             e < SWING_DOWN
               ? ease(e / SWING_DOWN)
-              : 1 - ease((e - SWING_DOWN) / SWING_UP),
-          );
+              : whack(e - SWING_DOWN, st.swing.velocity);
         }
       }
-      // The whack: on a hit the tip meets the head, then lifts.
+      // The whack: on a hit the tip meets the head, rebounds, then rests.
       const w = (nowMs - st.hitAt) / 1000;
-      if (w < WHACK) stroke = Math.max(stroke, 1 - ease(w / WHACK) * 0.6);
+      if (w < WHACK_LENGTH) stroke = whack(w, st.hitV);
 
       // Ease the drawn aim (snap on the first frame).
       const k = started.current ? 1 - Math.exp(-DRAW_FOLLOW * dt) : 1;
       st.point.lerp(target, st.swing ? Math.max(k, 0.6) : k);
       st.normal.lerp(targetNormal, k).normalize();
       poseStick(st, side, stroke);
+
+      // The trail: how fast the tip moves, and the stick's last places.
+      const tr = trails[side];
+      if (tr.stick && tr.tip && st.ghost) {
+        st.ghost.root.updateMatrixWorld(true);
+        tr.tip.getWorldPosition(tipNow);
+        const v = tr.filled
+          ? tipNow.distanceTo(tr.lastTip) / Math.max(1e-3, dt)
+          : 0;
+        tr.speed += (v - tr.speed) * 0.5;
+        tr.lastTip.copy(tipNow);
+        for (let i = tr.past.length - 1; i > 0; i -= 1)
+          tr.past[i].copy(tr.past[i - 1]);
+        tr.past[0].copy(tr.stick.matrixWorld);
+        tr.filled = Math.min(tr.past.length, tr.filled + 1);
+        const shown = Math.min(
+          1,
+          Math.max(0, (tr.speed - TRAIL.from) / TRAIL.full),
+        );
+        tr.copies.forEach((m, i) => {
+          /* eslint-disable no-param-reassign */
+          m.visible = shown > 0.02 && tr.filled > i + 1;
+          m.matrix.copy(tr.past[i + 1]);
+          m.matrixWorldNeedsUpdate = true;
+          (m.material as MeshBasicMaterial).opacity = shown * TRAIL.opacity[i];
+          /* eslint-enable no-param-reassign */
+        });
+      }
 
       // For the hi-hat: the tip's place (across the kit, and its height).
       const hatHead = headOf("hihat");
@@ -543,6 +643,9 @@ export const GhostHands = () => {
       <HandTracker targetFps={HAND_FPS} />
       <primitive object={models.left.root} />
       <primitive object={models.right.root} />
+      {[...trails.left.copies, ...trails.right.copies].map((m) => (
+        <primitive key={m.uuid} object={m} />
+      ))}
     </>
   );
 };

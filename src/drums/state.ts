@@ -2,7 +2,7 @@
 // Per-frame values are read and written in the frame loop (never React
 // state); the few the page UI shows bump a version it subscribes to.
 import { useSyncExternalStore } from "react";
-import type { Object3D, PerspectiveCamera, Vector3 } from "three";
+import { Vector3, type Object3D, type PerspectiveCamera } from "three";
 
 import { sound } from "./audio";
 import { HiHatControl, type HatEvent, type HatInput } from "./hihat";
@@ -21,6 +21,16 @@ export type Head = {
   /** The head's normal (up out of the head). */
   normal: Vector3;
   radius: number;
+};
+
+/** A hit, for the animations: where (the contact point, if known) and how hard. */
+export type HitEvent = {
+  seq: number;
+  piece: PieceId;
+  velocity: number;
+  point: Vector3 | null;
+  /** performance.now() / 1000 */
+  at: number;
 };
 
 const listeners = new Set<() => void>();
@@ -47,6 +57,9 @@ export const drums = {
     hihat: -1e9,
     crash: -1e9,
   } as Record<PieceId, number>,
+  /** The latest hits (the animations read the ones newer than they've seen). */
+  events: [] as HitEvent[],
+  seq: 0,
   /** Recent hits (read by the development debug object). */
   log: [] as Array<{
     t: number;
@@ -94,7 +107,12 @@ export const useDrumsVersion = () =>
   useSyncExternalStore(subscribe, () => version);
 
 /** A piece is hit: pick its sound, play it and start its animation. */
-export const strike = (piece: PieceId, velocity: number, by: HitSource) => {
+export const strike = (
+  piece: PieceId,
+  velocity: number,
+  by: HitSource,
+  point: Vector3 | null = null,
+) => {
   let id: SoundId;
   if (piece === "hihat") {
     if (drums.hihat.closed) id = "hihatClosed";
@@ -103,6 +121,15 @@ export const strike = (piece: PieceId, velocity: number, by: HitSource) => {
   if (id === "hihatClosed") sound.choke();
   sound.play(id, velocity);
   drums.hitAt[piece] = performance.now();
+  drums.seq += 1;
+  drums.events.push({
+    seq: drums.seq,
+    piece,
+    velocity,
+    point: point ? point.clone() : null,
+    at: performance.now() / 1000,
+  });
+  if (drums.events.length > 16) drums.events.shift();
   drums.log.push({
     t: Math.round(performance.now()),
     piece,
@@ -120,6 +147,10 @@ export const hatChanged = (e: HatEvent | null) => {
     sound.play("hihatPedal", 0.8);
   }
 };
+
+/** The hits since `seq` (oldest first). */
+export const hitsSince = (seq: number) =>
+  drums.events.filter((e) => e.seq > seq);
 
 export const headOf = (piece: PieceId) =>
   drums.heads.find((h) => h.id === piece) ?? null;

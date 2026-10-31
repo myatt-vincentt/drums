@@ -12,7 +12,7 @@ import { Vector3 } from "three";
 
 import { meter } from "./audio";
 import { cameraOverride } from "./CameraRig";
-import { devHands, devRest, devStroke, ghosts } from "./GhostHands";
+import { devHands, devRest, devStroke, ghosts, swingAt } from "./GhostHands";
 import type { View } from "./layout";
 import type { PieceId } from "./pieces";
 import { head } from "./NodKick";
@@ -49,6 +49,11 @@ const DevDebug = () => {
         devRest.right = right;
         devStroke.left = stroke;
         devStroke.right = stroke;
+      },
+      /** A tap on a piece at a point (as a click): the sound, the swing. */
+      tap(piece: PieceId, point: Vector3, velocity = 0.8) {
+        strike(piece, velocity, "pointer", point);
+        if (piece !== "kick") swingAt(piece, point, velocity);
       },
       real() {
         delete devHands.left;

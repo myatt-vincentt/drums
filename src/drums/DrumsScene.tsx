@@ -6,7 +6,8 @@
 //
 //   CameraRig.tsx     the views (drummer, front, top), fitted to the screen
 //   Studio.tsx        the room and its light, day and night
-//   Kit.tsx           the kit: its layout, beater and hi-hat moves, heads
+//   Kit.tsx           the kit: its layout and heads; kitMotion.ts: how it moves when hit
+//   Sparks.tsx        the flash where a stick lands hard
 //   GhostHands.tsx    the ghost hands and sticks, and their hits
 //   aim.ts            where a stick aims, and its stroke (pure)
 //   hits.ts           what counts as a hit (pure)
@@ -27,6 +28,7 @@ import { Kit } from "./Kit";
 import { NodKick } from "./NodKick";
 import { PointerInput } from "./PointerInput";
 import { Sound } from "./Sound";
+import { Sparks } from "./Sparks";
 import { Studio } from "./Studio";
 
 export const DrumsScene = () => (
@@ -36,6 +38,7 @@ export const DrumsScene = () => (
       <Studio />
       <Kit />
       <GhostHands />
+      <Sparks />
     </Suspense>
     <CameraFrame />
     <NodKick />

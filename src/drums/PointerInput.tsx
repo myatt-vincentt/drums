@@ -94,7 +94,12 @@ export const PointerInput = () => {
       setNdc(e);
       const found = pick();
       const id = found?.id ?? "kick";
-      strike(id, TAP_VELOCITY + (Math.random() - 0.5) * 0.08, "pointer");
+      strike(
+        id,
+        TAP_VELOCITY + (Math.random() - 0.5) * 0.08,
+        "pointer",
+        found?.point ?? null,
+      );
       if (found && id !== "kick") swingAt(id, found.point);
       held = true;
       const onHat = id === "hihat" && found;

@@ -12,10 +12,13 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { PerspectiveCamera, Vector3 } from "three";
 
+import { pulse } from "./fx";
 import { fitFov, viewPose, type CameraPose, type View } from "./layout";
 import { drums } from "./state";
 
 const GLIDE = 0.9;
+/** The kick's thump: from this loudness, how far (m) and how long (s). */
+const THUMP = { from: 0.6, depth: 0.006, length: 0.08 };
 /** Edges kept clear around the kit in each view (NDC). */
 const MARGIN = { side: 0.94, top: 0.9, bottom: 0.94 };
 
@@ -97,6 +100,16 @@ export const CameraRig = () => {
     }
     const shown = cameraOverride.pose ?? cur;
     cam.position.copy(shown.pos);
+    // A hard kick gives the view a tiny thump (a pixel or two, briefly).
+    for (let i = drums.events.length - 1; i >= 0; i -= 1) {
+      const e = drums.events[i];
+      if (e.piece === "kick") {
+        if (e.velocity > THUMP.from)
+          cam.position.y -=
+            THUMP.depth * e.velocity * pulse(now - e.at, THUMP.length);
+        break;
+      }
+    }
     cam.lookAt(shown.target);
     if (
       Math.abs(cam.fov - shown.fov) > 0.01 ||
