@@ -1,0 +1,294 @@
+{
+  "rate": 48000,
+  "pieces": {
+    "kick": [
+      {
+        "files": [
+          "kick-1a.m4a",
+          "kick-1b.m4a"
+        ],
+        "level": 0.444
+      },
+      {
+        "files": [
+          "kick-2a.m4a",
+          "kick-2b.m4a"
+        ],
+        "level": 0.53
+      },
+      {
+        "files": [
+          "kick-3a.m4a",
+          "kick-3b.m4a"
+        ],
+        "level": 0.672
+      },
+      {
+        "files": [
+          "kick-4a.m4a",
+          "kick-4b.m4a"
+        ],
+        "level": 0.821
+      },
+      {
+        "files": [
+          "kick-5a.m4a",
+          "kick-5b.m4a"
+        ],
+        "level": 1
+      }
+    ],
+    "snare": [
+      {
+        "files": [
+          "snare-1a.m4a",
+          "snare-1b.m4a"
+        ],
+        "level": 0.195
+      },
+      {
+        "files": [
+          "snare-2a.m4a",
+          "snare-2b.m4a"
+        ],
+        "level": 0.306
+      },
+      {
+        "files": [
+          "snare-3a.m4a",
+          "snare-3b.m4a"
+        ],
+        "level": 0.474
+      },
+      {
+        "files": [
+          "snare-4a.m4a",
+          "snare-4b.m4a"
+        ],
+        "level": 0.692
+      },
+      {
+        "files": [
+          "snare-5a.m4a",
+          "snare-5b.m4a"
+        ],
+        "level": 1
+      }
+    ],
+    "tom1": [
+      {
+        "files": [
+          "tom1-1a.m4a",
+          "tom1-1b.m4a"
+        ],
+        "level": 0.244
+      },
+      {
+        "files": [
+          "tom1-2a.m4a",
+          "tom1-2b.m4a"
+        ],
+        "level": 0.423
+      },
+      {
+        "files": [
+          "tom1-3a.m4a",
+          "tom1-3b.m4a"
+        ],
+        "level": 0.554
+      },
+      {
+        "files": [
+          "tom1-4a.m4a",
+          "tom1-4b.m4a"
+        ],
+        "level": 0.789
+      },
+      {
+        "files": [
+          "tom1-5a.m4a",
+          "tom1-5b.m4a"
+        ],
+        "level": 1
+      }
+    ],
+    "tom2": [
+      {
+        "files": [
+          "tom2-1a.m4a",
+          "tom2-1b.m4a"
+        ],
+        "level": 0.322
+      },
+      {
+        "files": [
+          "tom2-2a.m4a",
+          "tom2-2b.m4a"
+        ],
+        "level": 0.445
+      },
+      {
+        "files": [
+          "tom2-3a.m4a",
+          "tom2-3b.m4a"
+        ],
+        "level": 0.601
+      },
+      {
+        "files": [
+          "tom2-4a.m4a",
+          "tom2-4b.m4a"
+        ],
+        "level": 0.778
+      },
+      {
+        "files": [
+          "tom2-5a.m4a",
+          "tom2-5b.m4a"
+        ],
+        "level": 1
+      }
+    ],
+    "hihatClosed": [
+      {
+        "files": [
+          "hihatClosed-1a.m4a",
+          "hihatClosed-1b.m4a"
+        ],
+        "level": 0.309
+      },
+      {
+        "files": [
+          "hihatClosed-2a.m4a",
+          "hihatClosed-2b.m4a"
+        ],
+        "level": 0.401
+      },
+      {
+        "files": [
+          "hihatClosed-3a.m4a",
+          "hihatClosed-3b.m4a"
+        ],
+        "level": 0.564
+      },
+      {
+        "files": [
+          "hihatClosed-4a.m4a",
+          "hihatClosed-4b.m4a"
+        ],
+        "level": 0.767
+      },
+      {
+        "files": [
+          "hihatClosed-5a.m4a",
+          "hihatClosed-5b.m4a"
+        ],
+        "level": 1
+      }
+    ],
+    "hihatSemi": [
+      {
+        "files": [
+          "hihatSemi-1.m4a"
+        ],
+        "level": 0.48
+      },
+      {
+        "files": [
+          "hihatSemi-2.m4a"
+        ],
+        "level": 0.595
+      },
+      {
+        "files": [
+          "hihatSemi-3.m4a"
+        ],
+        "level": 0.685
+      },
+      {
+        "files": [
+          "hihatSemi-4.m4a"
+        ],
+        "level": 1
+      }
+    ],
+    "hihatOpen": [
+      {
+        "files": [
+          "hihatOpen-1.m4a"
+        ],
+        "level": 0.506
+      },
+      {
+        "files": [
+          "hihatOpen-2.m4a"
+        ],
+        "level": 0.573
+      },
+      {
+        "files": [
+          "hihatOpen-3.m4a"
+        ],
+        "level": 0.63
+      },
+      {
+        "files": [
+          "hihatOpen-4.m4a"
+        ],
+        "level": 0.813
+      },
+      {
+        "files": [
+          "hihatOpen-5.m4a"
+        ],
+        "level": 1
+      }
+    ],
+    "hihatPedal": [
+      {
+        "files": [
+          "hihatPedal-1.m4a"
+        ],
+        "level": 1.337
+      },
+      {
+        "files": [
+          "hihatPedal-2.m4a"
+        ],
+        "level": 1
+      }
+    ],
+    "crash": [
+      {
+        "files": [
+          "crash-1.m4a"
+        ],
+        "level": 0.197
+      },
+      {
+        "files": [
+          "crash-2.m4a"
+        ],
+        "level": 0.283
+      },
+      {
+        "files": [
+          "crash-3.m4a"
+        ],
+        "level": 0.35
+      },
+      {
+        "files": [
+          "crash-4.m4a"
+        ],
+        "level": 0.664
+      },
+      {
+        "files": [
+          "crash-5.m4a"
+        ],
+        "level": 1
+      }
+    ]
+  }
+}

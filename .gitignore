@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.DS_Store
+.vincentt/
+.opencode/
+opencode.json
+.env
+.env.local
+.env.*.local
+*.log
+.dev/
+dev-media/*.mp4
+dev-media/*.mov
