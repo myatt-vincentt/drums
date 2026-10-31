@@ -35,7 +35,7 @@ export type HitEvent = {
 };
 
 /**
- * Hand tracking starts off (play by tap, click or keys); the hands chip turns
+ * Hand tracking starts off (play by tap, click or keys); the hands button turns
  * it on. The choice lasts for the visit; `?hands=on` starts with it on.
  */
 const HANDS_KEY = "drums.hands";
@@ -105,6 +105,8 @@ export const drums = {
   } | null,
   /** A song listening to the hits (set while one runs). */
   songHit: null as ((piece: PieceId, tracked: boolean) => void) | null,
+  /** The "how to play" steps card is open. */
+  howTo: false,
   /** Your hands (and nods) play the kit. */
   handsOn: handsAtStart(),
   changed() {
@@ -123,8 +125,21 @@ export const setNight = (on: boolean) => {
   drums.changed();
 };
 
+/** The "how to play" steps show by themselves the first time hands go on. */
+const HOWTO_KEY = "drums.howto";
+
 export const toggleHands = () => {
   drums.handsOn = !drums.handsOn;
+  if (drums.handsOn) {
+    try {
+      if (window.sessionStorage.getItem(HOWTO_KEY) !== "seen") {
+        drums.howTo = true;
+        window.sessionStorage.setItem(HOWTO_KEY, "seen");
+      }
+    } catch {
+      drums.howTo = true;
+    }
+  }
   try {
     window.sessionStorage.setItem(HANDS_KEY, drums.handsOn ? "on" : "off");
   } catch {
@@ -182,6 +197,11 @@ export const strike = (
   });
   if (drums.log.length > 60) drums.log.shift();
   drums.songHit?.(piece, by === "left" || by === "right");
+  // The first real stroke closes the how-to card.
+  if (drums.howTo && (by === "left" || by === "right")) {
+    drums.howTo = false;
+    drums.changed();
+  }
 };
 
 /** The hi-hat opened or closed: the foot's sound (the top cymbal follows). */

@@ -17,7 +17,7 @@
 //   NodKick.tsx       the kick from a nod of the head (nod.ts)
 //   PointerInput.tsx  taps and clicks
 //   CameraFrame.tsx   your camera in the corner
-//   Hud.tsx           the view and light chips
+//   Hud.tsx           the bottom dock, song card, stars and how to play
 //   audio.ts          the recorded kit, played with Web Audio
 //   Sound.tsx         the wordless "tap for sound" speaker
 import { Suspense } from "react";

@@ -19,7 +19,7 @@ const NEAR = 1.15;
 
 const NODES = new Map<string, PieceId>(PIECES.map((p) => [p.node, p.id]));
 
-/** Is this event on a control (a chip, the camera, the media switcher…)? */
+/** Is this event on a control (the dock, a card, the camera, the media switcher…)? */
 const onControl = (e: Event) => {
   const el = e.target as HTMLElement | null;
   return !!el?.closest?.(

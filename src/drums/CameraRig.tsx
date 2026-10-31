@@ -1,4 +1,4 @@
-// The three views, switched with the view chip:
+// The three views, switched with the view button in the dock:
 //   drummer  from the drummer's seat, looking down at the kit (the default)
 //   front    from the room, facing the kit and the ghost hands
 //   top      from above
