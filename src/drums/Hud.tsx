@@ -1,14 +1,18 @@
 // The page UI, minimal, on glass, top right:
 //   - your camera (CameraFrame.tsx): tap it to tuck it away; a small camera
 //     button then sits in the corner to bring it back
-//   - under it, three chips: hand tracking on / off (off at first: play by
-//     tap, click or keys), the view (each tap goes to the next view:
-//     drummer, front, top) and the studio light (sun / moon)
-import type { ReactNode } from "react";
+//   - under it, four chips: songs (a music note: opens the card of songs and
+//     beats to Learn or Play; while one runs it stops it), hand tracking on /
+//     off (off at first: play by tap, click or keys), the view (each tap goes
+//     to the next view: drummer, front, top) and the studio light (sun / moon)
+//   - after a song: its stars (tap to close)
+import { useEffect, useState, type ReactNode } from "react";
 import { Html } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 
 import { frameRect, GUTTER, pinToScreen, type View } from "./layout";
+import { startSong, stopSong } from "./SongPlayer";
+import { CHARTS } from "./songs";
 import {
   drums,
   nextView,
@@ -47,6 +51,22 @@ const CSS = `
   display: flex; align-items: center; font: 600 13px/1 system-ui, -apple-system, sans-serif;
   white-space: nowrap; }
 .dr-pill.on { box-shadow: inset 0 0 0 1.5px ${ACCENT}; }
+.dr-card { position: absolute; pointer-events: auto; border-radius: 18px; padding: 10px;
+  display: flex; flex-direction: column; gap: 6px; min-width: 244px;
+  animation: dr-in 260ms ${EASE} both; }
+@keyframes dr-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+.dr-row { display: flex; align-items: center; gap: 8px; }
+.dr-row .dr-title { flex: 1; font: 600 14px/1.2 system-ui, -apple-system, sans-serif; padding-left: 4px; }
+.dr-small { pointer-events: auto; border: 1px solid rgb(235 246 253 / .22); background: rgb(255 255 255 / .08);
+  color: #fff; border-radius: 999px; height: 32px; padding: 0 12px; cursor: pointer;
+  font: 600 12px/1 system-ui, -apple-system, sans-serif; transition: transform 160ms ease-out; }
+.dr-small:active { transform: scale(0.95); }
+.dr-small.play { background: ${ACCENT}; color: #232528; border-color: transparent; }
+.dr-small.on { box-shadow: inset 0 0 0 1.5px ${ACCENT}; }
+.dr-stars { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); pointer-events: auto;
+  display: flex; gap: 6px; padding: 12px 18px; border-radius: 22px; cursor: pointer;
+  animation: dr-pop 420ms ${EASE} both; }
+@keyframes dr-pop { from { opacity: 0; transform: translate(-50%, 10px) scale(.92); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
 .dr-show { position: absolute; right: ${GUTTER}px; top: ${GUTTER}px; }
 .dr-gone { opacity: 0; pointer-events: none; }
 `;
@@ -78,6 +98,29 @@ const HandIcon = () => (
     <path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V11m0-5.5V4.5a1.5 1.5 0 0 1 3 0V11m0-5a1.5 1.5 0 0 1 3 0v6m0-3.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-4.6-2.2L4.3 14.6a1.6 1.6 0 0 1 2.4-2.1L8 14" />
   </Icon>
 );
+const NoteIcon = () => (
+  <Icon>
+    <path d="M9 18V5l11-2v13" />
+    <circle cx="6.5" cy="18" r="2.5" />
+    <circle cx="17.5" cy="16" r="2.5" />
+  </Icon>
+);
+const StopIcon = () => (
+  <Icon>
+    <rect x="7" y="7" width="10" height="10" rx="2" />
+  </Icon>
+);
+const Star = ({ on }: { on: boolean }) => (
+  <svg viewBox="0 0 24 24" width={34} height={34} aria-hidden="true">
+    <path
+      d="M12 2.8l2.8 5.9 6.4.8-4.7 4.4 1.2 6.4L12 17.2l-5.7 3.1 1.2-6.4-4.7-4.4 6.4-.8z"
+      fill={on ? ACCENT : "rgb(255 255 255 / .18)"}
+      stroke={on ? ACCENT : "rgb(255 255 255 / .45)"}
+      strokeWidth={1.2}
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 const ViewIcon = () => (
   <Icon>
     <path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12s-3.5 6.5-9.5 6.5S2.5 12 2.5 12Z" />
@@ -103,8 +146,20 @@ const VIEW_NAME: Record<View, string> = {
   top: "View: top",
 };
 
+/** The stars stay up this long after a song (ms). */
+const STARS_FOR = 5000;
+
 export const Hud = () => {
   useDrumsVersion();
+  const [, tick] = useState(0);
+  const finishedAt = drums.finish?.at ?? null;
+  useEffect(() => {
+    if (finishedAt === null) return undefined;
+    const t = window.setTimeout(() => tick((n) => n + 1), STARS_FOR);
+    return () => window.clearTimeout(t);
+  }, [finishedAt]);
+  const showStars =
+    drums.finish !== null && performance.now() - drums.finish.at < STARS_FOR;
   const width = useThree((s) => s.size.width);
   const height = useThree((s) => s.size.height);
   const frame = frameRect(width, height);
@@ -145,6 +200,22 @@ export const Hud = () => {
         <div className="dr-chips" style={{ top: chipsTop, right: GUTTER }}>
           <button
             type="button"
+            data-hud="songs"
+            className={`dr-btn dr-glass ${drums.session ? "dr-pill on" : ""}`}
+            aria-label={drums.session ? "Stop the song" : "Songs and beats"}
+            aria-expanded={drums.songCard}
+            onClick={() => {
+              if (drums.session) stopSong();
+              else {
+                drums.songCard = !drums.songCard;
+                drums.changed();
+              }
+            }}
+          >
+            {drums.session ? <StopIcon /> : <NoteIcon />}
+          </button>
+          <button
+            type="button"
             data-hud="hands"
             className={`dr-btn dr-glass dr-pill ${drums.handsOn ? "on" : ""}`}
             aria-pressed={drums.handsOn}
@@ -177,6 +248,62 @@ export const Hud = () => {
             {drums.night ? <MoonIcon /> : <SunIcon />}
           </button>
         </div>
+        {drums.songCard && !drums.session ? (
+          <div
+            className="dr-card dr-glass"
+            data-hud="song-card"
+            style={{ top: chipsTop + 54, right: GUTTER }}
+          >
+            {CHARTS.map((c) => (
+              <div className="dr-row" key={c.id}>
+                <span className="dr-title">{c.title}</span>
+                <button
+                  type="button"
+                  className="dr-small"
+                  onClick={() => startSong(c.id, "learn")}
+                >
+                  Learn
+                </button>
+                <button
+                  type="button"
+                  className="dr-small play"
+                  onClick={() => startSong(c.id, "play")}
+                >
+                  Play
+                </button>
+              </div>
+            ))}
+            <div className="dr-row" style={{ justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className={`dr-small ${drums.slow ? "on" : ""}`}
+                aria-pressed={drums.slow}
+                onClick={() => {
+                  drums.slow = !drums.slow;
+                  drums.changed();
+                }}
+              >
+                {drums.slow ? "Slow" : "Full speed"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {showStars && drums.finish ? (
+          <button
+            type="button"
+            data-hud="stars"
+            className="dr-stars dr-glass"
+            aria-label={`${drums.finish.stars} of 3 stars`}
+            onClick={() => {
+              drums.finish = null;
+              drums.changed();
+            }}
+          >
+            {[1, 2, 3].map((i) => (
+              <Star key={i} on={i <= (drums.finish?.stars ?? 0)} />
+            ))}
+          </button>
+        ) : null}
       </div>
     </Html>
   );

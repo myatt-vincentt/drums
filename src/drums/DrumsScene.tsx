@@ -8,6 +8,8 @@
 //   Studio.tsx        the room and its light, day and night
 //   Kit.tsx           the kit: its layout and heads; kitMotion.ts: how it moves when hit
 //   Sparks.tsx        the flash where a stick lands hard
+//   SongPlayer.tsx    Learn mode: songs and beats to play along (songs.ts,
+//                     session.ts, synth.ts)
 //   GhostHands.tsx    the ghost hands and sticks, and their hits
 //   aim.ts            where a stick aims, and its stroke (pure)
 //   hits.ts           what counts as a hit (pure)
@@ -27,6 +29,7 @@ import { Hud } from "./Hud";
 import { Kit } from "./Kit";
 import { NodKick } from "./NodKick";
 import { PointerInput } from "./PointerInput";
+import { SongPlayer } from "./SongPlayer";
 import { Sound } from "./Sound";
 import { Sparks } from "./Sparks";
 import { drums, useDrumsVersion } from "./state";
@@ -46,6 +49,7 @@ export const DrumsScene = () => (
       <Kit />
       <GhostHands />
       <Sparks />
+      <SongPlayer />
     </Suspense>
     <CameraFrame />
     <NodWhenOn />

@@ -7,6 +7,7 @@ import { Vector3, type Object3D, type PerspectiveCamera } from "three";
 import { sound } from "./audio";
 import { HiHatControl, type HatEvent, type HatInput } from "./hihat";
 import { VIEWS, type View } from "./layout";
+import type { Session } from "./session";
 import type { PieceId, SoundId } from "./pieces";
 
 /** A light hit on the open hi-hat (below this loudness) plays half-open. */
@@ -89,6 +90,14 @@ export const drums = {
   night: false,
   /** The corner camera is tucked away. */
   camHidden: false,
+  /** Learn mode: the song card is open, Play runs slower, the song now. */
+  songCard: false,
+  slow: false,
+  session: null as Session | null,
+  /** The last song's end (for the stars and the celebration). */
+  finish: null as { stars: number; at: number } | null,
+  /** A song listening to the hits (set while one runs). */
+  songHit: null as ((piece: PieceId) => void) | null,
   /** Your hands (and nods) play the kit. */
   handsOn: handsAtStart(),
   changed() {
@@ -165,6 +174,7 @@ export const strike = (
     by,
   });
   if (drums.log.length > 60) drums.log.shift();
+  drums.songHit?.(piece);
 };
 
 /** The hi-hat opened or closed: the foot's sound (the top cymbal follows). */

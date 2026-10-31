@@ -152,6 +152,11 @@ const stopVoice = (v: Voice, at: number, fade: number) => {
 };
 
 export const sound = {
+  /** The audio clock and the mix bus, for the backing synth (null before the first tap). */
+  audio() {
+    return ctx && master && unlocked ? { ctx, out: master } : null;
+  },
+
   /**
    * The output's level and its low end (kick, toms) right now, each 0..1:
    * quick to rise, easing back over about 0.16 s. Silent is 0.
