@@ -66,6 +66,8 @@ const prepare = (scene: Object3D): Prepared => {
   return { root, motion: new KitMotion(root), movable, centers };
 };
 
+const shift = new Vector3();
+
 export const Kit = () => {
   const { scene } = useGLTF(MODELS.kit);
   const size = useThree((s) => s.size);
@@ -96,10 +98,9 @@ export const Kit = () => {
     // The layout for this screen, then the hits' motion on top.
     let b = 0;
     kit.movable.forEach(({ id, nodes }) => {
-      const dx = pieceShift(id, aspect);
+      pieceShift(id, aspect, shift);
       nodes.forEach(({ rest }) => {
-        bodies[b].rest.copy(rest);
-        bodies[b].rest.x += dx;
+        bodies[b].rest.copy(rest).add(shift);
         b += 1;
       });
     });

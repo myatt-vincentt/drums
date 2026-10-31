@@ -16,18 +16,22 @@ export const phoneness = (aspect: number) =>
   Math.min(1, Math.max(0, (1.5 - aspect) / (1.5 - 0.56)));
 
 /**
- * On a tall screen the outer pieces move in towards the middle (metres
- * along x, at full phone shape), so the kit stays big across a narrow view.
+ * On a tall screen the outer pieces move in towards the middle (and a little
+ * back, so nothing collides): metres at full phone shape.
  */
-const PHONE_SHIFT: Partial<Record<PieceId, number>> = {
-  hihat: -0.1,
-  crash: 0.1,
-  snare: -0.06,
-  tom2: 0.06,
+const PHONE_SHIFT: Partial<Record<PieceId, [number, number, number]>> = {
+  hihat: [-0.1, 0, -0.08],
+  crash: [0.1, 0, 0],
+  snare: [-0.06, 0, -0.05],
+  tom2: [0.06, 0, -0.05],
 };
 
-export const pieceShift = (id: PieceId, aspect: number) =>
-  (PHONE_SHIFT[id] ?? 0) * phoneness(aspect);
+/** How far a piece moves for this screen shape (m). */
+export const pieceShift = (id: PieceId, aspect: number, out: Vector3) => {
+  const s = PHONE_SHIFT[id];
+  const k = phoneness(aspect);
+  return s ? out.set(s[0] * k, s[1] * k, s[2] * k) : out.set(0, 0, 0);
+};
 
 export type CameraPose = {
   pos: Vector3;

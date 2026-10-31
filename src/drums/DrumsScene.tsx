@@ -29,7 +29,14 @@ import { NodKick } from "./NodKick";
 import { PointerInput } from "./PointerInput";
 import { Sound } from "./Sound";
 import { Sparks } from "./Sparks";
+import { drums, useDrumsVersion } from "./state";
 import { Studio } from "./Studio";
+
+/** The nod kick only listens while hand tracking is on. */
+const NodWhenOn = () => {
+  useDrumsVersion();
+  return drums.handsOn ? <NodKick /> : null;
+};
 
 export const DrumsScene = () => (
   <>
@@ -41,7 +48,7 @@ export const DrumsScene = () => (
       <Sparks />
     </Suspense>
     <CameraFrame />
-    <NodKick />
+    <NodWhenOn />
     <PointerInput />
     <Hud />
     <Sound />

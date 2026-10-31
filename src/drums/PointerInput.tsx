@@ -69,9 +69,13 @@ export const PointerInput = () => {
         const id = hit ? pieceOf(hit.object) : null;
         const h = id ? headOf(id) : null;
         if (id && h) {
+          // Where on the head (in kit space): the ray's crossing of the
+          // head's plane, or the head's middle when that is far off (a head
+          // seen edge-on or from behind).
           plane.setFromNormalAndCoplanarPoint(h.normal, h.center);
-          const p = ray.ray.intersectPlane(plane, onPlane) ?? h.center;
-          return { id, point: p.clone() };
+          const p = ray.ray.intersectPlane(plane, onPlane);
+          const ok = p && p.distanceTo(h.center) < h.radius * 1.2;
+          return { id, point: (ok ? p : h.center).clone() };
         }
       }
       // Thin cymbal edges and near misses: the nearest head's disc.

@@ -7,9 +7,10 @@ describe("layout", () => {
   it("blends laptop to phone by the screen's shape", () => {
     expect(phoneness(16 / 9)).toBe(0);
     expect(phoneness(9 / 19.5)).toBe(1);
-    expect(pieceShift("hihat", 16 / 9)).toBeCloseTo(0);
-    expect(pieceShift("hihat", 0.46)).toBeCloseTo(-0.1);
-    expect(pieceShift("kick", 0.46)).toBeCloseTo(0);
+    const v = new Vector3();
+    expect(pieceShift("hihat", 16 / 9, v).length()).toBeCloseTo(0);
+    expect(pieceShift("hihat", 0.46, v).toArray()).toEqual([-0.1, 0, -0.08]);
+    expect(pieceShift("kick", 0.46, v).length()).toBeCloseTo(0);
   });
 
   it("uses the seat cameras at the two ends", () => {

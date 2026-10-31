@@ -33,13 +33,13 @@ const CRASH = { tilt: 0.13, tau: 0.42, freq: 2.1, turn: 0.12, shimmer: 0.55 };
 /** The hi-hat's top: sway, decay, rate, rattle (m), tick (m). */
 const HAT = { tilt: 0.05, tau: 0.16, freq: 6, rattle: 0.0012, tick: 0.0015 };
 /** The hi-hat's top: how far it drops to close (m) and how fast (s). */
-const HAT_DROP = 0.017;
+const HAT_DROP = 0.015;
 const HAT_CLOSE = 0.05;
 const HAT_OPEN = 0.14;
 /** The kick beater: its hinge in the kick's frame, strike angle, in / back (s). */
 const BEATER = {
   hinge: new Vector3(0, 0.128, -0.274),
-  strike: 0.631,
+  strike: 0.665,
   in: 0.045,
   out: 0.2,
 };

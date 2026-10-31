@@ -33,6 +33,21 @@ export type HitEvent = {
   at: number;
 };
 
+/**
+ * Hand tracking starts off (play by tap, click or keys); the hands chip turns
+ * it on. The choice lasts for the visit; `?hands=on` starts with it on.
+ */
+const HANDS_KEY = "drums.hands";
+const handsAtStart = () => {
+  try {
+    const q = new URLSearchParams(window.location.search).get("hands");
+    if (q === "on" || q === "off") return q === "on";
+    return window.sessionStorage.getItem(HANDS_KEY) === "on";
+  } catch {
+    return false;
+  }
+};
+
 const listeners = new Set<() => void>();
 let version = 0;
 
@@ -74,6 +89,8 @@ export const drums = {
   night: false,
   /** The corner camera is tucked away. */
   camHidden: false,
+  /** Your hands (and nods) play the kit. */
+  handsOn: handsAtStart(),
   changed() {
     version += 1;
     listeners.forEach((l) => l());
@@ -87,6 +104,16 @@ export const nextView = () => {
 
 export const setNight = (on: boolean) => {
   drums.night = on;
+  drums.changed();
+};
+
+export const toggleHands = () => {
+  drums.handsOn = !drums.handsOn;
+  try {
+    window.sessionStorage.setItem(HANDS_KEY, drums.handsOn ? "on" : "off");
+  } catch {
+    // private mode: it lasts until a reload
+  }
   drums.changed();
 };
 

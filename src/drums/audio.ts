@@ -58,6 +58,14 @@ export const meter = {
   }>,
 };
 
+let analyser: AnalyserNode | null = null;
+let wave: Float32Array | null = null;
+let bins: Uint8Array | null = null;
+/** What the room's speakers show: overall level and the low end (0..1, eased). */
+const out = { level: 0, low: 0 };
+/** Speaker motion: rise fast, fall back over this long (s). */
+const RELEASE = 0.16;
+
 const makeContext = () => {
   const AC =
     window.AudioContext ??
@@ -73,7 +81,13 @@ const makeContext = () => {
   limiter.ratio.value = 12;
   limiter.attack.value = 0.002;
   limiter.release.value = 0.15;
-  master.connect(limiter).connect(c.destination);
+  // A meter on what goes out (the speakers in the room move with it).
+  analyser = c.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0;
+  wave = new Float32Array(analyser.fftSize);
+  bins = new Uint8Array(analyser.frequencyBinCount);
+  master.connect(limiter).connect(analyser).connect(c.destination);
   return c;
 };
 
@@ -138,6 +152,36 @@ const stopVoice = (v: Voice, at: number, fade: number) => {
 };
 
 export const sound = {
+  /**
+   * The output's level and its low end (kick, toms) right now, each 0..1:
+   * quick to rise, easing back over about 0.16 s. Silent is 0.
+   */
+  levels(dt: number) {
+    if (!analyser || !wave || !bins || !ctx || ctx.state !== "running") {
+      out.level = 0;
+      out.low = 0;
+      return out;
+    }
+    analyser.getFloatTimeDomainData(wave as Float32Array<ArrayBuffer>);
+    let sum = 0;
+    for (let i = 0; i < wave.length; i += 1) sum += wave[i] * wave[i];
+    const rms = Math.sqrt(sum / wave.length);
+    analyser.getByteFrequencyData(bins as Uint8Array<ArrayBuffer>);
+    // The bins below about 150 Hz.
+    const top = Math.max(
+      1,
+      Math.round((150 / (ctx.sampleRate / 2)) * bins.length),
+    );
+    let low = 0;
+    for (let i = 1; i <= top; i += 1) low = Math.max(low, bins[i] / 255);
+    const level = Math.min(1, rms * 3.2);
+    const lowNow = Math.max(0, (low - 0.6) / 0.4);
+    const fall = Math.exp(-dt / (RELEASE / 3));
+    out.level = level > out.level ? level : out.level * fall;
+    out.low = lowNow > out.low ? lowNow : out.low * fall;
+    return out;
+  },
+
   meter,
 
   /** Start loading and decoding (no sound yet). */

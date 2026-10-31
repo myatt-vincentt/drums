@@ -53,7 +53,7 @@ describe("nod", () => {
   });
 
   it("plays louder for a faster nod", () => {
-    const soft = feed(new NodDetector(), 1, nodding(1, 0.2, 0.35));
+    const soft = feed(new NodDetector(), 1, nodding(1, 0.28, 0.35));
     const hard = feed(new NodDetector(), 1, nodding(1, 0.4, 0.2));
     expect(soft).toHaveLength(1);
     expect(hard).toHaveLength(1);

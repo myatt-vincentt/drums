@@ -24,16 +24,18 @@ export type Zone = {
 };
 
 export const STROKE = {
-  /** Downward speed (palms/s) that starts a stroke. */
-  startSpeed: 4,
+  /** Downward speed (palms/s) that starts a stroke… */
+  startSpeed: 6,
+  /** …after the hand has come down at least this far (palms) from its top. */
+  minTravel: 0.7,
+  /** The top fades this fast (palms/s), so a slow drift down never adds up. */
+  topFade: 2,
   /** Downward speed that plays at full loudness. */
   loudSpeed: 14,
   /** How far ahead along the motion (s) the path looks for a head. */
   lead: 0.07,
-  /** Upward speed (palms/s) that re-arms the stick after a hit. */
-  rearmSpeed: 1.2,
-  /** Or: a lift of this many palms above the lowest point since the hit. */
-  rearmRise: 0.35,
+  /** A lift of this many palms above the lowest point re-arms the stick. */
+  rearmRise: 0.6,
   /** Shortest time between two hits of one stick (s). */
   minGap: 0.08,
   /** A move of more palms than this in one reading is a tracking jump. */
@@ -180,6 +182,8 @@ export class StrokeDetector {
 
   private low = Infinity;
 
+  private top = -Infinity;
+
   private lastHit = -Infinity;
 
   /** Forget the stick (it left the camera). */
@@ -189,6 +193,7 @@ export class StrokeDetector {
     this.speed = 0;
     this.armed = true;
     this.low = Infinity;
+    this.top = -Infinity;
   }
 
   /**
@@ -220,18 +225,24 @@ export class StrokeDetector {
     this.prevDown = down;
 
     if (!this.armed) {
+      // Ready again only after a real lift.
       this.low = Math.min(this.low, s.y);
-      const lifted =
-        vy > STROKE.rearmSpeed || (s.y - this.low) / palm > STROKE.rearmRise;
-      if (lifted && s.t - this.lastHit >= STROKE.minGap) this.armed = true;
+      const lifted = (s.y - this.low) / palm > STROKE.rearmRise;
+      if (lifted && s.t - this.lastHit >= STROKE.minGap) {
+        this.armed = true;
+        this.top = s.y;
+      }
       return null;
     }
 
-    // A stroke: moving down fast, and already moving down a reading ago
-    // (or very fast now), so one noisy reading doesn't play.
+    // The hand's recent top (fading, so a slow drift never counts).
+    this.top = Math.max(s.y, this.top - STROKE.topFade * palm * dt);
+    // A stroke: moving down fast for two readings in a row, and come down a
+    // real distance; tracker jitter and small gestures don't play.
     const stroke =
       down > STROKE.startSpeed &&
-      (before > STROKE.startSpeed * 0.35 || down > STROKE.startSpeed * 1.6);
+      before > STROKE.startSpeed * 0.5 &&
+      (this.top - s.y) / palm >= STROKE.minTravel;
     if (!stroke || s.t - this.lastHit < STROKE.minGap) return null;
 
     let piece: PieceId | null;

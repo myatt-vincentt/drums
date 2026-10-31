@@ -8,9 +8,10 @@
 //   __drums.strike("snare", 0.8)           play a piece
 //   __drums.view("front"), __drums.night(true)
 import { useEffect } from "react";
+import { useThree } from "@react-three/fiber";
 import { Vector3 } from "three";
 
-import { meter } from "./audio";
+import { meter, sound } from "./audio";
 import { cameraOverride } from "./CameraRig";
 import { devHands, devRest, devStroke, ghosts, swingAt } from "./GhostHands";
 import type { View } from "./layout";
@@ -21,9 +22,13 @@ import { drums, setNight, strike } from "./state";
 type Side = "left" | "right";
 
 const DevDebug = () => {
+  const camera = useThree((st) => st.camera);
   useEffect(() => {
     const api = {
       drums,
+      camera,
+      /** The output's level and low end right now (what moves the speakers). */
+      levels: () => ({ ...sound.levels(0) }),
       meter,
       head,
       ghosts,
@@ -51,7 +56,7 @@ const DevDebug = () => {
         devStroke.right = stroke;
       },
       /** A tap on a piece at a point (as a click): the sound, the swing. */
-      tap(piece: PieceId, point: Vector3, velocity = 0.8) {
+      tap(piece: PieceId, point: Vector3 | null = null, velocity = 0.8) {
         strike(piece, velocity, "pointer", point);
         if (piece !== "kick") swingAt(piece, point, velocity);
       },
@@ -64,7 +69,7 @@ const DevDebug = () => {
     return () => {
       delete (window as unknown as { __drums?: typeof api }).__drums;
     };
-  }, []);
+  }, [camera]);
   return null;
 };
 

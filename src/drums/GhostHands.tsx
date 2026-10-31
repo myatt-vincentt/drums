@@ -41,7 +41,7 @@ import { StrokeDetector } from "./hits";
 import { dressModel } from "./look";
 import { MODELS } from "./models";
 import { STICK_PIECES, type PieceId } from "./pieces";
-import { drums, hatChanged, headOf, strike } from "./state";
+import { drums, hatChanged, headOf, strike, useDrumsVersion } from "./state";
 
 useGLTF.preload(MODELS.ghostLeft);
 useGLTF.preload(MODELS.ghostRight);
@@ -63,6 +63,8 @@ const ANCHOR = {
   left: new Vector3(0.32, 1.1, -0.7),
   right: new Vector3(-0.32, 1.1, -0.7),
 };
+/** Where the hands can be (m): the drummer's reach over the kit. */
+const HAND_SPACE = { x: 0.95, yMax: 1.45, zMax: 0.25 };
 /** How far the sticks angle in across the kit (share of forward). */
 const INWARD = 0.5;
 /** The hands never drop below this (m): above the drums, in view from the seat. */
@@ -173,15 +175,24 @@ export const ghosts: Record<Side, GhostState> = {
 };
 
 /** A tap on a piece: the nearer ghost swings onto it. */
-export const swingAt = (piece: PieceId, point: Vector3, velocity = 0.7) => {
+export const swingAt = (piece: PieceId, at: Vector3 | null, velocity = 0.7) => {
   const now = performance.now();
+  // On the head, within its rim (kit space, whatever the view).
+  const h = headOf(piece);
+  const point = (at ?? h?.center ?? new Vector3()).clone();
+  if (h) {
+    point.sub(h.center);
+    point.addScaledVector(h.normal, -point.dot(h.normal));
+    if (point.length() > h.radius * 0.85) point.setLength(h.radius * 0.85);
+    point.add(h.center);
+  }
   const dist = (s: Side) => ghosts[s].point.distanceTo(point);
   let side: Side = dist("left") <= dist("right") ? "left" : "right";
   const other: Side = side === "left" ? "right" : "left";
   // Quick taps alternate hands, like a roll.
   const busy = ghosts[side].swing && now - ghosts[side].swing!.at < 120;
   if (busy) side = other;
-  ghosts[side].swing = { piece, point: point.clone(), at: now, velocity };
+  ghosts[side].swing = { piece, point, at: now, velocity };
 };
 
 const ease = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
@@ -345,6 +356,19 @@ const poseStick = (st: GhostState, side: Side, stroke: number) => {
     );
   dir.copy(tipAt).sub(grip).normalize();
   grip.copy(tipAt).addScaledVector(dir, -L);
+  // Never out of the drummer's reach (and never towards the room).
+  if (
+    grip.z > HAND_SPACE.zMax ||
+    grip.y > HAND_SPACE.yMax ||
+    Math.abs(grip.x) > HAND_SPACE.x
+  ) {
+    grip.set(
+      Math.max(-HAND_SPACE.x, Math.min(HAND_SPACE.x, grip.x)),
+      Math.min(HAND_SPACE.yMax, grip.y),
+      Math.min(HAND_SPACE.zMax, grip.z),
+    );
+    dir.copy(tipAt).sub(grip).normalize();
+  }
   // Palms down, the backs of the hands turned a little outwards.
   back.set(side === "left" ? 0.45 : -0.45, 1, 0).normalize();
   placeGhost(g, grip, dir, back);
@@ -368,6 +392,7 @@ const playPoint = (
 };
 
 export const GhostHands = () => {
+  useDrumsVersion();
   const node = useXRModelNode<XRModelNodeHandTracking>(XRModel.HAND_TRACKER);
   const leftGltf = useGLTF(MODELS.ghostLeft);
   const rightGltf = useGLTF(MODELS.ghostRight);
@@ -429,7 +454,8 @@ export const GhostHands = () => {
     SIDES.forEach((side) => {
       const st = ghosts[side];
       const fake = devHands[side];
-      const pose = node?.poses?.[side] ?? null;
+      // With hand tracking off the ghosts rest (taps still swing them).
+      const pose = drums.handsOn ? (node?.poses?.[side] ?? null) : null;
       let reading: {
         gx: number;
         gy: number;
@@ -640,7 +666,7 @@ export const GhostHands = () => {
 
   return (
     <>
-      <HandTracker targetFps={HAND_FPS} />
+      {drums.handsOn ? <HandTracker targetFps={HAND_FPS} /> : null}
       <primitive object={models.left.root} />
       <primitive object={models.right.root} />
       {[...trails.left.copies, ...trails.right.copies].map((m) => (

@@ -1,14 +1,22 @@
 // The page UI, minimal, on glass, top right:
 //   - your camera (CameraFrame.tsx): tap it to tuck it away; a small camera
 //     button then sits in the corner to bring it back
-//   - under it, two chips: the view (a camera; each tap goes to the next
-//     view: drummer, front, top) and the studio light (sun / moon)
+//   - under it, three chips: hand tracking on / off (off at first: play by
+//     tap, click or keys), the view (each tap goes to the next view:
+//     drummer, front, top) and the studio light (sun / moon)
 import type { ReactNode } from "react";
 import { Html } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 
 import { frameRect, GUTTER, pinToScreen, type View } from "./layout";
-import { drums, nextView, setNight, toggleCam, useDrumsVersion } from "./state";
+import {
+  drums,
+  nextView,
+  setNight,
+  toggleCam,
+  toggleHands,
+  useDrumsVersion,
+} from "./state";
 
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 const ACCENT = "#f4d968";
@@ -35,6 +43,10 @@ const CSS = `
 .dr-cam { position: absolute; pointer-events: auto; border: 0; padding: 0; margin: 0;
   background: transparent; cursor: pointer; border-radius: 16px; outline: none; }
 .dr-cam:focus-visible { box-shadow: 0 0 0 2px ${ACCENT}; }
+.dr-pill { width: auto; padding: 0 14px 0 11px; border-radius: 22px; gap: 7px;
+  display: flex; align-items: center; font: 600 13px/1 system-ui, -apple-system, sans-serif;
+  white-space: nowrap; }
+.dr-pill.on { box-shadow: inset 0 0 0 1.5px ${ACCENT}; }
 .dr-show { position: absolute; right: ${GUTTER}px; top: ${GUTTER}px; }
 .dr-gone { opacity: 0; pointer-events: none; }
 `;
@@ -59,6 +71,11 @@ const CameraIcon = () => (
   <Icon>
     <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" />
     <circle cx="12" cy="13" r="3.5" />
+  </Icon>
+);
+const HandIcon = () => (
+  <Icon>
+    <path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V11m0-5.5V4.5a1.5 1.5 0 0 1 3 0V11m0-5a1.5 1.5 0 0 1 3 0v6m0-3.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-4.6-2.2L4.3 14.6a1.6 1.6 0 0 1 2.4-2.1L8 14" />
   </Icon>
 );
 const ViewIcon = () => (
@@ -126,6 +143,16 @@ export const Hud = () => {
           <CameraIcon />
         </button>
         <div className="dr-chips" style={{ top: chipsTop, right: GUTTER }}>
+          <button
+            type="button"
+            data-hud="hands"
+            className={`dr-btn dr-glass dr-pill ${drums.handsOn ? "on" : ""}`}
+            aria-pressed={drums.handsOn}
+            onClick={toggleHands}
+          >
+            <HandIcon />
+            {drums.handsOn ? "Hands on" : "Hands off"}
+          </button>
           <button
             type="button"
             data-hud="view"

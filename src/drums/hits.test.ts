@@ -105,6 +105,33 @@ describe("strokes", () => {
     ).toBeNull();
   });
 
+  it("ignores small quick gestures and jitter (no real stroke)", () => {
+    // A quick dip of half a palm (a thumbs-up pump), many times.
+    const det = new StrokeDetector();
+    let hits = 0;
+    let t = 0;
+    for (let k = 0; k < 10; k += 1) {
+      [0, -0.25, -0.5, -0.25, 0].forEach((dy) => {
+        if (det.push({ t, x: 0, y: 0.03 + dy * PALM, palm: PALM }, ZONES))
+          hits += 1;
+        t += 1 / FPS;
+      });
+    }
+    expect(hits).toBe(0);
+    // Jitter: ±0.2 palm, every reading.
+    const d2 = new StrokeDetector();
+    let jit = 0;
+    for (let i = 0; i < 60; i += 1)
+      if (
+        d2.push(
+          { t: i / FPS, x: 0, y: (i % 2 ? 0.2 : -0.2) * PALM, palm: PALM },
+          ZONES,
+        )
+      )
+        jit += 1;
+    expect(jit).toBe(0);
+  });
+
   it("ignores tracking jumps", () => {
     const det = new StrokeDetector();
     det.push({ t: 0, x: 0, y: 0.5, palm: PALM }, ZONES);
@@ -132,8 +159,8 @@ describe("strokes", () => {
     const soft = run(
       new StrokeDetector(),
       [snare],
-      { t: 0, x: 0, y: 0.1 },
-      -5,
+      { t: 0, x: 0, y: 0.12 },
+      -7,
       8,
     );
     const hard = run(

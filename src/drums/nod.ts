@@ -6,10 +6,10 @@
 // doesn't count. A faster nod plays a louder kick.
 
 export const NOD = {
-  /** The head must drop this far (radians, ~5°) from its recent top… */
-  drop: 0.09,
+  /** The head must drop this far (radians, ~8°) from its recent top… */
+  drop: 0.14,
   /** …moving down at least this fast (rad/s). */
-  speed: 1.1,
+  speed: 1.6,
   /** This fast (rad/s) is a full-loudness kick. */
   loudSpeed: 3,
   /** The "recent top" is the highest pitch in this window (s). */
@@ -19,7 +19,7 @@ export const NOD = {
   /** Shortest time between two nods (s). */
   minGap: 0.18,
   /** Pitch must move this many times faster than yaw (no shakes). */
-  yawRatio: 1.2,
+  yawRatio: 1.6,
   /** Readings further apart than this (s) don't make a speed. */
   maxDt: 0.2,
 };
