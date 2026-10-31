@@ -9,7 +9,13 @@
 //   - the songs card just above the dock (on a tall screen, up in the room)
 //   - after a song: its stars, again and next
 //   - the how-to-play steps, the first time hands go on (or from the dock)
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { Html } from "@react-three/drei";
 import { useThree } from "@react-three/fiber";
 
@@ -23,7 +29,9 @@ import {
 } from "./SongPlayer";
 import { CHARTS } from "./songs";
 import {
+  closeHowTo,
   drums,
+  INTRO_CARD_MS,
   nextView,
   setNight,
   toggleCam,
@@ -111,7 +119,18 @@ const CSS = `
 .dr-step .dr-pic { flex: none; width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center;
   background: rgb(255 255 255 / .08); color: #fff; }
 .dr-step .dr-num { color: ${ACCENT}; font-weight: 700; margin-right: 2px; }
-@media (prefers-reduced-motion: reduce) { .dr-card, .dr-stars, .dr-howto, .dr-howto-back { animation: none; } }
+.dr-count { position: absolute; left: 22px; right: 22px; bottom: -1px; height: 2px; border-radius: 2px;
+  background: rgb(255 255 255 / .12); overflow: hidden; }
+.dr-count > div { height: 100%; background: ${ACCENT}; transform-origin: 0 50%;
+  animation: dr-count var(--dr-count) linear both; }
+@keyframes dr-count { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+.dr-leave, .dr-leave .dr-howto { animation: dr-out 320ms ${EASE} both; pointer-events: none; }
+@keyframes dr-out { to { opacity: 0; } }
+.dr-dock.pulse::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; pointer-events: none;
+  animation: dr-pulse 1500ms ${EASE} both; }
+@keyframes dr-pulse { from { box-shadow: 0 0 0 0 rgb(244 217 104 / .6); }
+  to { box-shadow: 0 0 0 22px rgb(244 217 104 / 0); } }
+@media (prefers-reduced-motion: reduce) { .dr-card, .dr-stars, .dr-howto, .dr-howto-back, .dr-dock.pulse::after { animation: none; } }
 `;
 
 const Icon = ({
@@ -334,6 +353,27 @@ export const Hud = () => {
     return () => window.clearTimeout(t);
   }, [finishedAt]);
   useEffect(() => () => window.clearTimeout(tapTimer.current), []);
+  // The first steps card closes by itself; a closing card fades out.
+  const until = drums.howToUntil;
+  useEffect(() => {
+    if (until === null) return undefined;
+    const t = window.setTimeout(
+      () => closeHowTo(),
+      Math.max(0, until - performance.now()),
+    );
+    return () => window.clearTimeout(t);
+  }, [until]);
+  const open = drums.howTo;
+  const [leaving, setLeaving] = useState(false);
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current === open) return undefined;
+    wasOpen.current = open;
+    setLeaving(!open);
+    if (open) return undefined;
+    const t = window.setTimeout(() => setLeaving(false), 320);
+    return () => window.clearTimeout(t);
+  }, [open]);
   const showStars =
     drums.finish !== null && performance.now() - drums.finish.at < STARS_FOR;
   const width = useThree((s) => s.size.width);
@@ -359,7 +399,7 @@ export const Hud = () => {
           on: drums.songCard,
           act: () => {
             drums.songCard = !drums.songCard;
-            drums.howTo = false;
+            closeHowTo();
             drums.changed();
           },
         },
@@ -389,7 +429,11 @@ export const Hud = () => {
       icon: <HelpIcon />,
       on: drums.howTo,
       act: () => {
-        drums.howTo = !drums.howTo;
+        if (drums.howTo) {
+          closeHowTo();
+          return;
+        }
+        drums.howTo = true;
         drums.songCard = false;
         drums.changed();
       },
@@ -428,21 +472,31 @@ export const Hud = () => {
           <CameraIcon />
         </button>
 
-        {drums.howTo ? (
+        {drums.howTo || leaving ? (
           <div
-            className="dr-howto-back"
+            className={`dr-howto-back ${drums.howTo ? "" : "dr-leave"}`}
             data-hud="howto"
             role="presentation"
-            onPointerDown={() => {
-              drums.howTo = false;
-              drums.changed();
-            }}
+            onPointerDown={() => closeHowTo()}
           >
             <div
               className="dr-howto dr-glass"
               role="dialog"
               aria-label="How to play"
             >
+              {drums.howTo && until !== null ? (
+                <div
+                  className="dr-count"
+                  aria-hidden="true"
+                  style={
+                    {
+                      "--dr-count": `${INTRO_CARD_MS}ms`,
+                    } as CSSProperties
+                  }
+                >
+                  <div />
+                </div>
+              ) : null}
               {STEPS.map((st, i) => (
                 <div className="dr-step" key={st.text}>
                   <span className="dr-pic">{st.pic}</span>
@@ -556,7 +610,10 @@ export const Hud = () => {
           </div>
         ) : null}
 
-        <div className="dr-dock dr-glass" data-hud="dock">
+        <div
+          className={`dr-dock dr-glass ${drums.dockPulseAt !== null ? "pulse" : ""}`}
+          data-hud="dock"
+        >
           {drums.session ? (
             <div className="dr-dock-line" aria-hidden="true">
               <div

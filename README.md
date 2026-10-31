@@ -1,3 +1,64 @@
+# Drums
+
+A full 3D drum kit in a recording studio, played with your hands. The studio fills the whole
+screen: you sit behind the kit, and two see-through ghost hands holding drumsticks follow your
+real hands. Strike down over a drum or a cymbal to hit it; nod (or tap) for the kick. The LED
+strips flash the colour of what you hit. Your camera sits small in the top right corner.
+
+- **Start:** the home page shows at once while the studio, the kit, the hands and the sounds load
+  in the background; the Start button fills as they load. Start turns the sound on and asks for
+  the camera (hand tracking starts only then). A short "how to play" card shows for 5 seconds,
+  then the dock pulses once and the snare glows until your first hit.
+- **Play by hand** (on by default): show both hands, make fists, strike down at a drum. A faster
+  stroke hits harder. Rest a stick on the hi-hat to close it. Nod for the kick.
+- **Play without hands:** tap or click a drum or cymbal; hold on the hi-hat to close it; Space
+  plays the kick.
+- **The dock** (bottom centre; a label shows on hover or for a moment after a tap): Songs (the
+  song card; Stop while a song runs), Hands on / off, View (Drummer, Front, Top), Day / Night,
+  and How to play. Tap the corner camera to tuck it away.
+- **Learn and Play:** five songs and beats. Learn waits for each hit; Play keeps time and gives
+  up to three stars (a slower speed is on the card). A ring lands on the next piece on the beat;
+  the end brings confetti and a rainbow sweep on the LEDs. Best stars are kept for the visit.
+- `?hands=off` starts with hand tracking off; the choice is kept for the visit.
+
+## Files
+
+```
+src/drums/
+  DrumsScene.tsx    the scene, loaded on its own after the home page shows
+  Home.tsx          the home page (Start, loading, credit)
+  Hud.tsx           the dock, the song card, the stars and the how-to-play card
+  CameraRig.tsx     the views (drummer, front, top), fitted to the screen (layout.ts)
+  Studio.tsx        the room, its baked light (day / night) and the kit's lights
+  led.ts            the LED colour flash on hits (pure)
+  Kit.tsx           the kit; kitMotion.ts: how it moves when hit
+  GhostHands.tsx    the ghost hands and sticks (ghost.ts), aim (aim.ts) and strokes (hits.ts)
+  hihat.ts          closing the hi-hat by holding still (pure)
+  NodKick.tsx       the kick from a nod (nod.ts)
+  PointerInput.tsx  taps, clicks and keys
+  SongPlayer.tsx    Learn and Play (songs.ts, session.ts, synth.ts)
+  Invite.tsx        the glow on the snare that invites the first hit
+  Sparks.tsx        the flash where a stick lands hard
+  CameraFrame.tsx   your camera in the corner
+  audio.ts          the recorded kit, played with Web Audio
+  state.ts          what the parts share
+public/models/      the kit, the studio and its bakes, the ghost hands
+public/sounds/      the drum samples (kit.json lists them)
+```
+
+- `src/App.tsx` uses a full-window container instead of the 9:16 frame, starts the camera on the
+  home page's Start (at once when framed), and uses the home page in place of the loading screen;
+  re-apply after a template upgrade.
+- Dev preview without a camera: the media switcher starts on an SDK sample video. Tap the drums
+  to play; `window.__drums` (dev only, `src/drums/DevDebug.tsx`) for the rest.
+
+## Credits
+
+Drum sounds: CrocellKit by the DrumGizmo team (CC BY 4.0). The 3D models, the studio and the code
+are our own. Details in `CREDITS.md`.
+
+---
+
 # v2-template
 
 The Vincentt starter app: a real React + R3F + Vincentt XR SDK (`@vincentt-xr/sdk`)

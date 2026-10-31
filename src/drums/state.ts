@@ -35,17 +35,17 @@ export type HitEvent = {
 };
 
 /**
- * Hand tracking starts off (play by tap, click or keys); the hands button turns
- * it on. The choice lasts for the visit; `?hands=on` starts with it on.
+ * Hand tracking starts on (taps, clicks and keys play too); the hands button
+ * turns it off. The choice lasts for the visit; `?hands=off` starts with it off.
  */
 const HANDS_KEY = "drums.hands";
 const handsAtStart = () => {
   try {
     const q = new URLSearchParams(window.location.search).get("hands");
     if (q === "on" || q === "off") return q === "on";
-    return window.sessionStorage.getItem(HANDS_KEY) === "on";
+    return window.sessionStorage.getItem(HANDS_KEY) !== "off";
   } catch {
-    return false;
+    return true;
   }
 };
 
@@ -105,8 +105,20 @@ export const drums = {
   } | null,
   /** A song listening to the hits (set while one runs). */
   songHit: null as ((piece: PieceId, tracked: boolean) => void) | null,
+  /** The studio, the kit and the hands have loaded. */
+  loaded: false,
+  /** Start was tapped on the home page (the camera and hand tracking run). */
+  started: false,
+  /** The home page has gone (the kit is in front of you). */
+  entered: false,
   /** The "how to play" steps card is open. */
   howTo: false,
+  /** It opened right after Start: it closes by itself (performance.now() ms). */
+  howToUntil: null as number | null,
+  /** After the first card: the dock's one pulse (performance.now() ms)… */
+  dockPulseAt: null as number | null,
+  /** …and the glow on the snare, until the first hit. */
+  invite: false,
   /** Your hands (and nods) play the kit. */
   handsOn: handsAtStart(),
   changed() {
@@ -144,6 +156,45 @@ export const toggleHands = () => {
     window.sessionStorage.setItem(HANDS_KEY, drums.handsOn ? "on" : "off");
   } catch {
     // private mode: it lasts until a reload
+  }
+  drums.changed();
+};
+
+/** Start on the home page: the sound, the camera and hand tracking. */
+export const start = () => {
+  if (drums.started) return;
+  sound.unlock();
+  drums.started = true;
+  drums.changed();
+};
+
+/** The home page has faded: the steps card shows for a few seconds. */
+export const INTRO_CARD_MS = 5000;
+export const enter = () => {
+  if (drums.entered) return;
+  drums.entered = true;
+  drums.howTo = true;
+  drums.howToUntil = performance.now() + INTRO_CARD_MS;
+  try {
+    window.sessionStorage.setItem(HOWTO_KEY, "seen");
+  } catch {
+    // private mode
+  }
+  drums.changed();
+};
+
+/**
+ * The steps card closes. After the first one the dock pulses once and the
+ * snare glows until the first hit (not when a hit closed it: you've begun).
+ */
+export const closeHowTo = (byHit = false) => {
+  if (!drums.howTo) return;
+  const first = drums.howToUntil !== null;
+  drums.howTo = false;
+  drums.howToUntil = null;
+  if (first) {
+    drums.dockPulseAt = performance.now();
+    drums.invite = !byHit;
   }
   drums.changed();
 };
@@ -197,9 +248,11 @@ export const strike = (
   });
   if (drums.log.length > 60) drums.log.shift();
   drums.songHit?.(piece, by === "left" || by === "right");
-  // The first real stroke closes the how-to card.
-  if (drums.howTo && (by === "left" || by === "right")) {
-    drums.howTo = false;
+  // The first real stroke closes the how-to card; any first hit ends the
+  // snare's invitation.
+  if (drums.howTo && (by === "left" || by === "right")) closeHowTo(true);
+  if (drums.invite) {
+    drums.invite = false;
     drums.changed();
   }
 };

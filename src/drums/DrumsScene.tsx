@@ -19,26 +19,36 @@
 //   CameraFrame.tsx   your camera in the corner
 //   Hud.tsx           the bottom dock, song card, stars and how to play
 //   audio.ts          the recorded kit, played with Web Audio
-//   Sound.tsx         the wordless "tap for sound" speaker
-import { Suspense } from "react";
+//   Home.tsx          the home page (Start), shown over the scene while it loads
+//   Invite.tsx        the glow on the snare that invites the first hit
+import { Suspense, useEffect } from "react";
 
 import { CameraFrame } from "./CameraFrame";
 import { CameraRig } from "./CameraRig";
 import { GhostHands } from "./GhostHands";
 import { Hud } from "./Hud";
+import { Invite } from "./Invite";
 import { Kit } from "./Kit";
 import { NodKick } from "./NodKick";
 import { PointerInput } from "./PointerInput";
 import { SongPlayer } from "./SongPlayer";
-import { Sound } from "./Sound";
 import { Sparks } from "./Sparks";
 import { drums, useDrumsVersion } from "./state";
 import { Studio } from "./Studio";
 
-/** The nod kick only listens while hand tracking is on. */
+/** The nod kick only listens once started, while hand tracking is on. */
 const NodWhenOn = () => {
   useDrumsVersion();
-  return drums.handsOn ? <NodKick /> : null;
+  return drums.started && drums.handsOn ? <NodKick /> : null;
+};
+
+/** Mounts once everything above it has loaded (the home page waits for it). */
+const Loaded = () => {
+  useEffect(() => {
+    drums.loaded = true;
+    drums.changed();
+  }, []);
+  return null;
 };
 
 export const DrumsScene = () => (
@@ -50,11 +60,12 @@ export const DrumsScene = () => (
       <GhostHands />
       <Sparks />
       <SongPlayer />
+      <Invite />
+      <Loaded />
     </Suspense>
     <CameraFrame />
     <NodWhenOn />
     <PointerInput />
     <Hud />
-    <Sound />
   </>
 );

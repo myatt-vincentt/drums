@@ -23,10 +23,12 @@ type Side = "left" | "right";
 
 const DevDebug = () => {
   const camera = useThree((st) => st.camera);
+  const scene = useThree((st) => st.scene);
   useEffect(() => {
     const api = {
       drums,
       camera,
+      scene,
       /** The output's level and low end right now (what moves the speakers). */
       levels: () => ({ ...sound.levels(0) }),
       audio: () => sound.audio(),
@@ -70,7 +72,7 @@ const DevDebug = () => {
     return () => {
       delete (window as unknown as { __drums?: typeof api }).__drums;
     };
-  }, [camera]);
+  }, [camera, scene]);
   return null;
 };
 

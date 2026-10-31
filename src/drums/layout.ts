@@ -54,7 +54,7 @@ const DRUMMER = {
 };
 const FRONT = {
   laptop: { pos: [0, 1.3, 2.35], target: [0, 0.85, -0.6], vfov: 54 },
-  phone: { pos: [0, 1.35, 2.35], target: [0, 1.0, -0.6], hfov: 66 },
+  phone: { pos: [0, 1.35, 2.35], target: [0, 1.0, -0.6], hfov: 46 },
 };
 const TOP = {
   laptop: { pos: [0, 2.75, -0.45], target: [0, 0.6, 0.0], vfov: 46 },

@@ -35,22 +35,29 @@ export const cameraOverride: { pose: CameraPose | null } = { pose: null };
 
 /**
  * The Front view also keeps the wall behind the kit in the shot: the ON AIR
- * sign, the neon under it and the two plants either side.
+ * sign and the neon under it, and the kit down to its feet…
  */
 const FRONT_WALL = [
   [-0.3, 2.64, -2.34],
   [0.3, 2.64, -2.34],
   [-0.7, 1.88, -2.34],
   [0.7, 1.88, -2.34],
-  [-1.95, 1.15, -1.9],
-  [-1.95, 0.05, -1.5],
-  [1.85, 1.78, -1.9],
-  [1.85, 0.05, -1.6],
-  // …and the whole kit, down to its feet.
   [-0.85, 0, 0.35],
   [0.85, 0, 0.35],
   [0, 0, 0.5],
 ].map(([x, y, z]) => new Vector3(x, y, z));
+/**
+ * …and the two plants either side, except on a tall narrow screen (there
+ * they sit partly off the edges, so the kit can be bigger).
+ */
+const FRONT_PLANTS = [
+  [-1.95, 1.15, -1.9],
+  [-1.95, 0.05, -1.5],
+  [1.85, 1.78, -1.9],
+  [1.85, 0.05, -1.6],
+].map(([x, y, z]) => new Vector3(x, y, z));
+/** Below this width ÷ height the plants may leave the shot. */
+const PLANTS_FROM_ASPECT = 0.8;
 
 const probe = new PerspectiveCamera();
 const pts = Array.from({ length: 50 }, () => new Vector3());
@@ -74,7 +81,10 @@ const fittedPose = (view: View, aspect: number, out: CameraPose) => {
     n += 5;
   });
   if (view === "front")
-    FRONT_WALL.forEach((p) => {
+    [
+      ...FRONT_WALL,
+      ...(aspect >= PLANTS_FROM_ASPECT ? FRONT_PLANTS : []),
+    ].forEach((p) => {
       pts[n].copy(p);
       n += 1;
     });

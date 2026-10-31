@@ -4,7 +4,7 @@ export const MODELS = {
   /** The ghost hands, each holding its stick in a drummer's grip. */
   ghostLeft: "/models/ghost-hand-stick-L.glb",
   ghostRight: "/models/ghost-hand-stick-R.glb",
-  /** The recording studio, its baked light and its light probes. */
+  /** The recording studio, its baked light and its light probe. */
   studio: "/models/studio.glb",
   lightmapDay: "/models/studio-lightmap-day.webp",
   lightmapNight: "/models/studio-lightmap-night.webp",

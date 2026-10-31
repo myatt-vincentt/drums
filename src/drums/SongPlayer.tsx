@@ -37,7 +37,7 @@ import { drums, headOf } from "./state";
 import { playTone, type ToneHandle, type Voice } from "./synth";
 
 /** Play's slower speed. */
-export const SLOW = 0.75;
+const SLOW = 0.75;
 /** How far ahead (s) the backing is scheduled. */
 const LOOKAHEAD = 0.15;
 /** The target ring starts this many beats before its note, this much wider. */
@@ -111,12 +111,6 @@ const saveBest = (id: string, stars: number) => {
 
 /** The bottom progress line (set by the page UI). */
 export const progressLine: { el: HTMLElement | null } = { el: null };
-
-/**
- * A tracked stroke is read before the stick reaches the head (that hides
- * the camera's delay); its moment is taken as the contact this much later.
- */
-export const STROKE_TO_CONTACT = 0;
 
 /** Starts a song (from a tap: it also starts the sound). */
 export const startSong = (id: string, mode: Mode) => {
@@ -308,11 +302,10 @@ export const SongPlayer = () => {
   }, []);
 
   useEffect(() => {
-    drums.songHit = (piece, tracked) => {
+    drums.songHit = (piece) => {
       const s = drums.session;
       const a = sound.audio();
-      if (s && a)
-        s.hit(piece, a.ctx.currentTime + (tracked ? STROKE_TO_CONTACT : 0));
+      if (s && a) s.hit(piece, a.ctx.currentTime);
     };
     // Hiding the page pauses the song and its backing; coming back goes on
     // after a one-bar count-in.

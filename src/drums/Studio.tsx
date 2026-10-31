@@ -43,7 +43,8 @@ import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
 import { sound } from "./audio";
 import { EXPOSURE } from "./look";
 import { MODELS } from "./models";
-import { drums } from "./state";
+import { LedFlash } from "./led";
+import { drums, hitsSince } from "./state";
 
 useGLTF.preload(MODELS.studio);
 
@@ -105,6 +106,20 @@ const COVE = {
 /** How bright the kit's reflections are at night (the day probe, dimmed). */
 const NIGHT_REFLECTIONS = 0.6;
 
+/**
+ * The LEDs' colour flash on hits, by day and at night: on the cove strip, on
+ * the low strip, as a wash on the walls and on the kit. By day it is softer
+ * (it competes with the window). Kept low: brighter, the tone curve turns
+ * the colour white.
+ */
+const LED_FLASH = {
+  cove: { day: 1.1, night: 1.4 },
+  strip: { day: 1.2, night: 1.5 },
+  wash: { day: 0.25, night: 0.45 },
+  kit: { day: 0.4, night: 0.6 },
+};
+const LED_KIT_COLOR = new Color("#8c40ff");
+
 type Level = { day: number; night: number };
 /**
  * The live light on the kit, day and night: the renders' rig, in the
@@ -126,6 +141,13 @@ const RIG: Record<string, Level> = {
 
 const ease = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
 const mix = (r: Level, k: number) => r.day + (r.night - r.day) * k;
+const addScaled = (to: Color, c: Color, s: number) => {
+  /* eslint-disable no-param-reassign */
+  to.r += c.r * s;
+  to.g += c.g * s;
+  to.b += c.b * s;
+  /* eslint-enable no-param-reassign */
+};
 
 /** The ceiling can positions (x, z). */
 const CANS: [number, number][] = [-1.3, 0, 1.3].flatMap((x) =>
@@ -413,6 +435,10 @@ export const Studio = () => {
 
   const blend = useRef({ k: drums.night ? 1 : 0, from: 0, to: 0, at: -10 });
   const tmp = useMemo(() => ({ a: new Color(), b: new Color() }), []);
+  const led = useMemo(
+    () => ({ flash: new LedFlash(), seq: drums.seq, finish: -1 }),
+    [],
+  );
 
   useFrame((_, dt) => {
     // The canvas is set up flat (no shadows, no tone curve) and can be
@@ -483,6 +509,42 @@ export const Studio = () => {
           .multiplyScalar(cn.strength + cn.music * beat),
         k,
       );
+    // The LEDs flash the colour of what you hit (a rainbow after a song).
+    hitsSince(led.seq).forEach((e) => {
+      led.flash.hit(e.piece, e.velocity);
+      led.seq = e.seq;
+    });
+    if (drums.finish && drums.finish.at !== led.finish) {
+      led.finish = drums.finish.at;
+      led.flash.celebrate(drums.finish.at / 1000);
+    }
+    led.flash.update(Math.min(dt, 0.1), now);
+    const a = led.flash.amount;
+    if (a > 0.001) {
+      // The LEDs turn to the flash's colour (as lit as the flash).
+      const fc = led.flash.color;
+      tmp.a.copy(fc).multiplyScalar(1 / Math.max(fc.r, fc.g, fc.b, 1e-3));
+      cove.forEach((m) =>
+        addScaled(
+          m.color.multiplyScalar(1 - a),
+          tmp.a,
+          a * mix(LED_FLASH.cove, k),
+        ),
+      );
+      (glow.LedStrip ?? []).forEach((m) =>
+        addScaled(
+          m.color.multiplyScalar(1 - a),
+          tmp.a,
+          a * mix(LED_FLASH.strip, k),
+        ),
+      );
+      addScaled(
+        bake.uCove.value.multiplyScalar(1 - a),
+        tmp.a,
+        a * mix(LED_FLASH.wash, k),
+      );
+      rig.led.color.copy(LED_KIT_COLOR).lerp(tmp.a, a);
+    } else rig.led.color.copy(LED_KIT_COLOR);
     // ON AIR: lit while you play (and all through Play), fading after a
     // few quiet seconds; it flashes when a song ends.
     const lastHit = Math.max(...Object.values(drums.hitAt)) / 1000;
@@ -515,7 +577,8 @@ export const Studio = () => {
       c.intensity = mix(RIG.cans, k);
     });
     rig.lamp.intensity = mix(RIG.lamp, k);
-    rig.led.intensity = mix(RIG.led, k);
+    rig.led.intensity =
+      mix(RIG.led, k) + a * RIG.led.night * mix(LED_FLASH.kit, k);
     rig.key.intensity = mix(RIG.key, k);
     rig.key.castShadow = k >= 0.5;
     // The kit reflects the day probe at night too, dimmed: the night probe

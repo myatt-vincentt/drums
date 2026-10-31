@@ -1,8 +1,9 @@
 {
-  "title": "XR App - Vincentt",
-  "description": "An AR experience built with Vincentt",
+  "title": "Drums",
+  "description": "Play a real drum kit with your hands: a 3D studio kit with ghost drumsticks that follow your hands, songs to learn and play, and LEDs that flash with every hit",
+  "url": "https://drums.vincentt.app",
   "image": "/images/og-default.jpg",
-  "imageAlt": "Vincentt — Augmented Reality App builder",
+  "imageAlt": "Drums — a camera experience built with Vincentt",
   "imageWidth": 1200,
   "imageHeight": 630,
   "imageType": "image/jpeg"

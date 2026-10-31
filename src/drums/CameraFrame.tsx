@@ -117,8 +117,8 @@ const frag = /* glsl */ `
 
 const ease = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
 
-/** How shown the corner camera is (0 tucked away … 1 shown), for the page UI. */
-export const frameShown = { k: 1 };
+/** How shown the corner camera is (0 tucked away … 1 shown). */
+const frameShown = { k: 1 };
 
 export const CameraFrame = () => {
   const texture = useXRCameraTexture();

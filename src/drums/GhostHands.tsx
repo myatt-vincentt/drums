@@ -666,7 +666,9 @@ export const GhostHands = () => {
 
   return (
     <>
-      {drums.handsOn ? <HandTracker targetFps={HAND_FPS} /> : null}
+      {drums.started && drums.handsOn ? (
+        <HandTracker targetFps={HAND_FPS} />
+      ) : null}
       <primitive object={models.left.root} />
       <primitive object={models.right.root} />
       {[...trails.left.copies, ...trails.right.copies].map((m) => (

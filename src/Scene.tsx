@@ -1,8 +1,10 @@
-// Scene.tsx — Drums: a full 3D drum kit in front of you, a drumstick in each
-// hand. Free play.
+// Scene.tsx — Drums: a full 3D drum kit in a recording studio, a drumstick in
+// each hand. The scene's code loads on its own, after the home page shows.
 import { lazy, Suspense } from "react";
 
-import { DrumsScene } from "./drums/DrumsScene";
+const DrumsScene = lazy(async () => ({
+  default: (await import("./drums/DrumsScene")).DrumsScene,
+}));
 
 // Dev-only helpers for previewing without a camera. Lazy and behind a
 // constant esbuild folds to false in production. Two rules:
@@ -20,7 +22,9 @@ const DevDebug =
 
 export const Scene = () => (
   <>
-    <DrumsScene />
+    <Suspense fallback={null}>
+      <DrumsScene />
+    </Suspense>
     {DevMediaSwitcher && DevDebug ? (
       <Suspense fallback={null}>
         <DevMediaSwitcher />

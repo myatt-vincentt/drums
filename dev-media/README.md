@@ -5,7 +5,7 @@ Optional dev-only preview media. Nothing here ships: only
 production builds.
 
 You don't need anything here. Without a webcam, `pnpm dev` starts on the SDK's
-built-in "Person Looking" video and lists every SDK sample video and image.
+sample video of a person giving a thumbs-up and lists every SDK sample video and image.
 Click or tap the drums to play them.
 
 To preview with your own clip, add it at `dev-media/drums.mp4` (H.264 MP4); it
