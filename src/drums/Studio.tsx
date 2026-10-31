@@ -8,8 +8,8 @@
 // strip) shine at their day or night strength. The kit and the ghost hands
 // take live light from the same rig the renders used (daylight through the
 // window, a sun with soft shadows, fills; at night the ceiling cans, the lamp,
-// the LED strip and a cool key), and reflect the studio through its own
-// 360° light probe. Day and night blend smoothly (strict ease-out).
+// the LED strip and a warm key), and reflect the studio through its own
+// 360° light probe (the day one, dimmed at night). Day and night blend smoothly (strict ease-out).
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useFrame, useLoader, useThree } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
@@ -52,7 +52,7 @@ const SWITCH = 0.9;
 /** Shadow map size by screen (phones get a smaller one). */
 const SHADOW = { desktop: 2048, phone: 1024 };
 /** The lightmaps' strength (they hold light ÷ this, π included). */
-const LIGHTMAP = { day: 10.869 * Math.PI, night: 11.835 * Math.PI };
+const LIGHTMAP = { day: 10.869 * Math.PI, night: 39 };
 
 type Glow = { color: [number, number, number]; strength: number };
 /** The glowing parts, day and night (as in the studio's renders). */
@@ -102,6 +102,9 @@ const COVE = {
   night: { color: [0.8, 0.72, 1.0], strength: 0.05, music: 0.35 },
 };
 
+/** How bright the kit's reflections are at night (the day probe, dimmed). */
+const NIGHT_REFLECTIONS = 0.6;
+
 type Level = { day: number; night: number };
 /**
  * The live light on the kit, day and night: the renders' rig, in the
@@ -115,8 +118,10 @@ const RIG: Record<string, Level> = {
   fillFront: { day: 110 / (Math.PI ** 2 * 2.5 * 2.5), night: 0 },
   cans: { day: 0, night: 90 / (4 * Math.PI ** 2) },
   lamp: { day: 0, night: 60 / (4 * Math.PI ** 2) },
-  led: { day: 0, night: 160 / (Math.PI ** 2 * 4.5 * 0.05) },
-  key: { day: 0, night: 260 / (4 * Math.PI ** 2) },
+  // The LED strip on the kit at half the render's strength (gentler purple).
+  led: { day: 0, night: 80 / (Math.PI ** 2 * 4.5 * 0.05) },
+  // A warm-white key from above the front right keeps the cymbals bronze.
+  key: { day: 0, night: 320 / (4 * Math.PI ** 2) },
 };
 
 const ease = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
@@ -234,10 +239,7 @@ export const Studio = () => {
     MODELS.lightmapNight,
     MODELS.coveMask,
   ]);
-  const [envDay, envNight] = useLoader(RGBELoader, [
-    MODELS.envDay,
-    MODELS.envNight,
-  ]);
+  const envDay = useLoader(RGBELoader, MODELS.envDay);
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
   const size = useThree((s) => s.size);
@@ -319,18 +321,14 @@ export const Studio = () => {
     return { room: r, glow: glowing };
   }, [model, dayMap, bake, speaker]);
 
-  // The light probes (pre-filtered once).
-  const envs = useMemo(() => {
+  // The light probe (pre-filtered once).
+  const envMap = useMemo(() => {
     const pmrem = new PMREMGenerator(gl);
-    const make = (t: Texture) => {
-      // eslint-disable-next-line no-param-reassign
-      t.mapping = EquirectangularReflectionMapping;
-      return pmrem.fromEquirectangular(t).texture;
-    };
-    const out = { day: make(envDay), night: make(envNight) };
+    envDay.mapping = EquirectangularReflectionMapping;
+    const out = pmrem.fromEquirectangular(envDay).texture;
     pmrem.dispose();
     return out;
-  }, [gl, envDay, envNight]);
+  }, [gl, envDay]);
 
   // The kit's live lights, built once.
   const rig = useMemo(() => {
@@ -365,7 +363,7 @@ export const Studio = () => {
     const led = new RectAreaLight("#8c40ff", 0, 4.5, 0.05);
     led.position.set(0, 0.14, 2.52);
     led.lookAt(0, 0.6, 0);
-    const key = new SpotLight("#d9ccff", 0, 8, (27.5 * Math.PI) / 180, 0.6, 2);
+    const key = new SpotLight("#fff0dc", 0, 8, (27.5 * Math.PI) / 180, 0.6, 2);
     key.position.set(0.8, 2.6, 1.2);
     key.target.position.set(0, 0.6, -0.2);
     shadowed(key);
@@ -409,10 +407,9 @@ export const Studio = () => {
     const before = scene.environment;
     return () => {
       scene.environment = before;
-      envs.day.dispose();
-      envs.night.dispose();
+      envMap.dispose();
     };
-  }, [scene, envs]);
+  }, [scene, envMap]);
 
   const blend = useRef({ k: drums.night ? 1 : 0, from: 0, to: 0, at: -10 });
   const tmp = useMemo(() => ({ a: new Color(), b: new Color() }), []);
@@ -521,10 +518,10 @@ export const Studio = () => {
     rig.led.intensity = mix(RIG.led, k);
     rig.key.intensity = mix(RIG.key, k);
     rig.key.castShadow = k >= 0.5;
-    const env = k < 0.5 ? envs.day : envs.night;
-    if (scene.environment !== env) scene.environment = env;
-    // Through the switch the reflections dim, then come up on the other probe.
-    scene.environmentIntensity = 0.35 + 0.65 * Math.abs(1 - 2 * k);
+    // The kit reflects the day probe at night too, dimmed: the night probe
+    // alone leaves the cymbals a dull copper and the heads purple.
+    if (scene.environment !== envMap) scene.environment = envMap;
+    scene.environmentIntensity = 1 + (NIGHT_REFLECTIONS - 1) * k;
   });
 
   return (
