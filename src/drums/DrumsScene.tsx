@@ -10,7 +10,8 @@
 //   Sparks.tsx        the flash where a stick lands hard
 //   SongPlayer.tsx    Learn mode: songs and beats to play along (songs.ts,
 //                     session.ts, synth.ts)
-//   GhostHands.tsx    the ghost hands and sticks, and their hits
+//   GhostHands.tsx    the ghost hands and sticks, their aim and their hits
+//   AimGlow.tsx       the soft glow on the piece each hand aims at
 //   aim.ts            where a stick aims, and its stroke (pure)
 //   hits.ts           what counts as a hit (pure)
 //   hihat.ts          closing the hi-hat by holding still (pure)
@@ -25,6 +26,7 @@ import { Suspense, useEffect } from "react";
 
 import { CameraFrame } from "./CameraFrame";
 import { CameraRig } from "./CameraRig";
+import { AimGlow } from "./AimGlow";
 import { GhostHands } from "./GhostHands";
 import { Hud } from "./Hud";
 import { Invite } from "./Invite";
@@ -58,6 +60,7 @@ export const DrumsScene = () => (
       <Studio />
       <Kit />
       <GhostHands />
+      <AimGlow />
       <Sparks />
       <SongPlayer />
       <Invite />

@@ -1,161 +1,156 @@
-// Where a ghost stick aims, and how far it is struck down.
+// Where each hand aims: a piece of the kit, picked from where the hand is on
+// the camera picture.
 //
-// Your hand on the camera picture points at the kit as seen from the
-// drummer's seat: left–right goes across the kit, up–down goes from the near
-// drums (low on screen) to the far ones and the cymbals (high on screen).
-// The aim follows your hand, except while it strikes: a quick move down
-// holds the aim where the stroke began and swings the stick down instead,
-// so a stroke whacks the drum you were over rather than sliding to the one
-// nearer you. A slow move down (or resting low for a moment) moves the aim.
+// The picture is split into big regions laid out like the kit in front of
+// you: the cymbals up high (the hi-hat on the left, the crash on the right)
+// and the drums below (the snare on the left, the tom in the middle, the
+// floor tom on the right). The regions cover your own reach: a box learnt
+// from where your hands go, so a small or a big reach plays the whole kit.
 //
-// A gentle aim assist pulls the aim towards the middle of the nearest head,
-// so hits near an edge still land.
-import { Ray, Vector3 } from "three";
-
+// The aimed piece changes only once the hand is clearly over the next
+// region (not when it wavers on a border), and a quick move down (a stroke)
+// never changes it: a stroke plays the piece it started over.
+//
+// Units: the picture as you see it (mirrored on a webcam), u right and v
+// down, 0..1.
 import type { PieceId } from "./pieces";
+import { inBox, type Box } from "./reach";
 
-export const AIM = {
-  /** Heads count out to this many radii (with the assist pulling in). */
-  reach: 1.6,
-  /** Pull towards the middle: none inside this many radii… */
-  pullFrom: 0.5,
-  /** …rising to this share at the reach. */
-  pull: 0.55,
-  /** With no head near, the aim rests on this height (m). */
-  restHeight: 0.78,
+export { inBox, REACH, ReachBox, type Box } from "./reach";
+
+export type StickPiece = Exclude<PieceId, "kick">;
+
+export const LAYOUT = {
+  /** The cymbals take the box above this share of its height… */
+  row: 0.5,
+  /** …split across here (hi-hat left, crash right). */
+  cymbals: 0.5,
+  /** The drums below: the snare, the tom and the floor tom, split here
+   * (the snare, the most played, a little wider). */
+  drums: [0.38, 0.62] as const,
+  /** A hand changes piece only this far (share of the box) past a border. */
+  margin: 0.07,
 };
 
-export const HOLD = {
-  /** Following the hand (1/s). */
-  follow: 18,
-  /** Following sideways while a stroke holds the aim (1/s). */
-  sideways: 4,
-  /** Below the held aim by more than this share of a palm counts as striking. */
-  below: 0.15,
-  /** Slower than this (palms/s) while low… */
-  slow: 1.5,
-  /** …for this long (s) moves the aim down after all. */
-  release: 0.3,
-  /** A full stroke: the hand this many palms below the held aim. */
-  strokePalms: 1,
-  /** The deepest stroke (1 = the tip on the head). */
-  maxStroke: 1.15,
+export const AIM_HOLD = {
+  /** Moving down faster than this (box heights/s): a stroke, the aim holds… */
+  speed: 0.9,
+  /** …for at most this long (s), or until the hand is back up. */
+  most: 0.4,
+  /** How fast the aim follows the hand (1/s). */
+  follow: 25,
 };
 
-export type AimHead = {
-  id: PieceId;
-  center: Vector3;
-  normal: Vector3;
-  radius: number;
+/** Each piece's region of the box: x0, x1, y0, y1 (0..1, y down). */
+export const REGIONS: Record<
+  StickPiece,
+  readonly [number, number, number, number]
+> = {
+  hihat: [0, LAYOUT.cymbals, 0, LAYOUT.row],
+  crash: [LAYOUT.cymbals, 1, 0, LAYOUT.row],
+  snare: [0, LAYOUT.drums[0], LAYOUT.row, 1],
+  tom1: [LAYOUT.drums[0], LAYOUT.drums[1], LAYOUT.row, 1],
+  tom2: [LAYOUT.drums[1], 1, LAYOUT.row, 1],
 };
 
-export type Aim = {
-  /** The aimed piece, or null (between pieces, in the air). */
-  piece: PieceId | null;
-  /** Where on it (on the head's plane, after the assist). */
-  point: Vector3;
-  /** The head's normal there (straight up in the air). */
-  normal: Vector3;
-  /** How far out from the head's middle, in radii, before the assist. */
-  reach: number;
+export const STICK_ORDER: StickPiece[] = [
+  "hihat",
+  "crash",
+  "snare",
+  "tom1",
+  "tom2",
+];
+
+/** The piece whose region holds a point of the box. */
+export const regionAt = (x: number, y: number): StickPiece => {
+  if (y < LAYOUT.row) return x < LAYOUT.cymbals ? "hihat" : "crash";
+  if (x < LAYOUT.drums[0]) return "snare";
+  return x < LAYOUT.drums[1] ? "tom1" : "tom2";
 };
 
-const hitPoint = new Vector3();
-const toCenter = new Vector3();
-const UP = new Vector3(0, 1, 0);
-
-/* eslint-disable no-param-reassign */
-/** The aim along a ray from the seat, among the heads a stick can play. */
-export const aimAlong = (
-  ray: Ray,
-  heads: readonly AimHead[],
-  out: Aim,
-): Aim => {
-  let best: AimHead | null = null;
-  let bestQ = Infinity;
-  heads.forEach((h) => {
-    const denom = h.normal.dot(ray.direction);
-    if (Math.abs(denom) < 1e-4) return;
-    const t = toCenter.copy(h.center).sub(ray.origin).dot(h.normal) / denom;
-    if (t <= 0) return;
-    ray.at(t, hitPoint);
-    const q = hitPoint.distanceTo(h.center) / h.radius;
-    if (q < bestQ) {
-      bestQ = q;
-      best = h;
-    }
-  });
-  const h = best as AimHead | null;
-  if (h && bestQ <= AIM.reach) {
-    const denom = h.normal.dot(ray.direction);
-    const t = toCenter.copy(h.center).sub(ray.origin).dot(h.normal) / denom;
-    ray.at(t, out.point);
-    const k =
-      AIM.pull *
-      Math.min(
-        1,
-        Math.max(0, (bestQ - AIM.pullFrom) / (AIM.reach - AIM.pullFrom)),
-      );
-    out.point.lerp(h.center, k);
-    out.normal.copy(h.normal);
-    out.piece = h.id;
-    out.reach = bestQ;
-    return out;
-  }
-  // In the air: rest on a level a little above the drums.
-  const dy = ray.direction.y;
-  const t = Math.abs(dy) > 1e-4 ? (AIM.restHeight - ray.origin.y) / dy : 1;
-  ray.at(Math.max(0.2, Math.min(3, t)), out.point);
-  out.normal.copy(UP);
-  out.piece = null;
-  out.reach = Infinity;
-  return out;
+/** Still over `current` (its region widened by the margin on its inner borders)? */
+export const stillOver = (current: StickPiece, x: number, y: number) => {
+  const [x0, x1, y0, y1] = REGIONS[current];
+  const m = LAYOUT.margin;
+  return x >= x0 - m && x <= x1 + m && y >= y0 - m && y <= y1 + m;
 };
-/* eslint-enable no-param-reassign */
 
-/** The aim on screen (NDC of the seat's view) and how far the stick is struck. */
-export class AimHold {
-  x = 0;
+/** The aimed piece, with hysteresis: it changes only clearly past a border. */
+export const nextAim = (
+  current: StickPiece | null,
+  x: number,
+  y: number,
+): StickPiece =>
+  current && stillOver(current, x, y) ? current : regionAt(x, y);
 
-  y = 0;
+/**
+ * One hand's aim. It follows the hand (eased), except while the hand moves
+ * down fast (a stroke): then it holds where the stroke began, until the hand
+ * lifts again or rests a moment.
+ */
+export class HandAim {
+  /** The aim's place on the picture. */
+  u = 0.5;
 
-  ready = false;
+  v = 0.5;
 
-  /** 0 (resting above the head) … 1 (tip on the head) and a little past. */
-  stroke = 0;
+  /** Its place in the box (0..1). */
+  x = 0.5;
 
-  private lowFor = 0;
+  y = 0.5;
+
+  piece: StickPiece | null = null;
+
+  /** The aim is held by a stroke. */
+  held = false;
+
+  private ready = false;
+
+  private prevV = 0;
+
+  private heldFor = 0;
 
   reset() {
     this.ready = false;
-    this.stroke = 0;
-    this.lowFor = 0;
+    this.held = false;
+    this.piece = null;
+    this.heldFor = 0;
   }
 
-  /**
-   * The hand's point (NDC), its speed (palms/s) and its palm length (NDC
-   * units), `dt` seconds after the last reading.
-   */
-  update(dt: number, px: number, py: number, speed: number, palm: number) {
+  /** A reading of the hand (picture u, v) `dt` s after the last, in the box `b`. */
+  update(dt: number, u: number, v: number, b: Box) {
+    const h = Math.max(1e-6, b.v1 - b.v0);
     if (!this.ready) {
-      this.x = px;
-      this.y = py;
       this.ready = true;
-      this.stroke = 0;
-      return;
+      this.u = u;
+      this.v = v;
+      this.prevV = v;
+      this.held = false;
+    } else {
+      const down = (v - this.prevV) / h / Math.max(1e-3, dt);
+      this.prevV = v;
+      if (this.held) {
+        this.heldFor += dt;
+        // Back up to where it began, or the stroke is over: follow again.
+        if (
+          v <= this.v ||
+          (this.heldFor >= AIM_HOLD.most && down < AIM_HOLD.speed)
+        )
+          this.held = false;
+      } else if (down > AIM_HOLD.speed) {
+        this.held = true;
+        this.heldFor = 0;
+      }
+      if (!this.held) {
+        const k = 1 - Math.exp(-AIM_HOLD.follow * Math.min(0.2, dt));
+        this.u += (u - this.u) * k;
+        this.v += (v - this.v) * k;
+      }
     }
-    const p = Math.max(1e-3, palm);
-    const low = py < this.y - HOLD.below * p;
-    if (low) {
-      this.lowFor = speed < HOLD.slow ? this.lowFor + dt : 0;
-    } else this.lowFor = 0;
-    const holding = low && this.lowFor < HOLD.release;
-    const kx = 1 - Math.exp(-(holding ? HOLD.sideways : HOLD.follow) * dt);
-    this.x += (px - this.x) * kx;
-    if (!holding) this.y += (py - this.y) * (1 - Math.exp(-HOLD.follow * dt));
-    this.stroke = Math.min(
-      HOLD.maxStroke,
-      Math.max(0, (this.y - py) / (HOLD.strokePalms * p)),
-    );
+    const p = inBox(b, this.u, this.v);
+    this.x = p.x;
+    this.y = p.y;
+    this.piece = nextAim(this.piece, p.x, p.y);
+    return this.piece;
   }
 }

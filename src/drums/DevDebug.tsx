@@ -2,7 +2,8 @@
 // camera — the heads, the hit log, the sound meter, the head reading, the
 // ghosts, and pretend hands:
 //
-//   __drums.fakeHand("right", x, y, palm)  hold a pretend hand (tracker units)
+//   __drums.fakeHand("right", x, y)        a pretend hand reading (tracker units:
+//                                          x right, y up, -1..1; call again to move it)
 //   __drums.fakeHand("right", null)        take it away
 //   __drums.real()                         back to the tracked hands
 //   __drums.strike("snare", 0.8)           play a piece
@@ -13,7 +14,16 @@ import { Vector3 } from "three";
 
 import { meter, sound } from "./audio";
 import { cameraOverride } from "./CameraRig";
-import { devHands, devRest, devStroke, ghosts, swingAt } from "./GhostHands";
+import {
+  devHands,
+  devRest,
+  devStroke,
+  devTrace,
+  ghosts,
+  reach,
+  reachBox,
+  swingAt,
+} from "./GhostHands";
 import type { View } from "./layout";
 import type { PieceId } from "./pieces";
 import { head } from "./NodKick";
@@ -35,6 +45,10 @@ const DevDebug = () => {
       meter,
       head,
       ghosts,
+      /** The hand hits (time, hand, piece, the hand's place) and the learnt reach. */
+      trace: devTrace,
+      reach,
+      reachBox,
       strike,
       view(v: View) {
         drums.view = v;

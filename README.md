@@ -9,8 +9,11 @@ strips flash the colour of what you hit. Your camera sits small in the top right
   in the background; the Start button fills as they load. Start turns the sound on and asks for
   the camera (hand tracking starts only then). A short "how to play" card shows for 5 seconds,
   then the dock pulses once and the snare glows until your first hit.
-- **Play by hand** (on by default): show both hands, make fists, strike down at a drum. A faster
-  stroke hits harder. Rest a stick on the hi-hat to close it. Nod for the kick.
+- **Play by hand** (on by default): show both hands. The camera picture is split like the kit,
+  over your own reach (learnt as you play): the hi-hat up left, the crash up right, the snare,
+  the tom and the floor tom below. The piece a hand is over glows and its stick hovers there;
+  strike down to play it. A faster stroke hits harder. Rest a stick on the hi-hat to close it.
+  Nod for the kick. The corner camera shows your hands and the regions.
 - **Play without hands:** tap or click a drum or cymbal; hold on the hi-hat to close it; Space
   plays the kick.
 - **The dock** (bottom centre; a label shows on hover or for a moment after a tap): Songs (the
@@ -32,14 +35,17 @@ src/drums/
   Studio.tsx        the room, its baked light (day / night) and the kit's lights
   led.ts            the LED colour flash on hits (pure)
   Kit.tsx           the kit; kitMotion.ts: how it moves when hit
-  GhostHands.tsx    the ghost hands and sticks (ghost.ts), aim (aim.ts) and strokes (hits.ts)
+  GhostHands.tsx    the ghost hands and sticks (ghost.ts), aim (aim.ts), which hand is
+                    which (pair.ts) and strokes (hits.ts)
+  AimGlow.tsx       the soft glow on the piece each hand aims at
+  tracking.ts       the camera and hand tracking settings (SDK tracking config)
   hihat.ts          closing the hi-hat by holding still (pure)
   NodKick.tsx       the kick from a nod (nod.ts)
   PointerInput.tsx  taps, clicks and keys
   SongPlayer.tsx    Learn and Play (songs.ts, session.ts, synth.ts)
   Invite.tsx        the glow on the snare that invites the first hit
   Sparks.tsx        the flash where a stick lands hard
-  CameraFrame.tsx   your camera in the corner
+  CameraFrame.tsx   your camera in the corner, with your hands and the regions
   audio.ts          the recorded kit, played with Web Audio
   state.ts          what the parts share
 public/models/      the kit, the studio and its bakes, the ghost hands

@@ -1,99 +1,88 @@
-import { Ray, Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 
-import { AIM, aimAlong, AimHold, HOLD, type Aim, type AimHead } from "./aim";
+import {
+  HandAim,
+  LAYOUT,
+  nextAim,
+  ReachBox,
+  REACH,
+  regionAt,
+  type Box,
+} from "./aim";
 
-const UP = new Vector3(0, 1, 0);
-const heads: AimHead[] = [
-  {
-    id: "snare",
-    center: new Vector3(0.3, 0.66, -0.3),
-    normal: UP,
-    radius: 0.16,
-  },
-  {
-    id: "tom2",
-    center: new Vector3(-0.45, 0.63, -0.25),
-    normal: UP,
-    radius: 0.18,
-  },
-];
-const newAim = (): Aim => ({
-  piece: null,
-  point: new Vector3(),
-  normal: new Vector3(),
-  reach: 0,
-});
-/** A ray straight down onto (x, z). */
-const down = (x: number, z: number) =>
-  new Ray(new Vector3(x, 2, z), new Vector3(0, -1, 0));
+const BOX: Box = { u0: 0, u1: 1, v0: 0, v1: 1 };
 
-describe("aim", () => {
-  it("aims at the head under the ray", () => {
-    const a = aimAlong(down(0.3, -0.3), heads, newAim());
-    expect(a.piece).toBe("snare");
-    expect(a.point.y).toBeCloseTo(0.66);
-    expect(a.reach).toBeCloseTo(0);
+describe("regions", () => {
+  it("lays the kit out like you see it", () => {
+    expect(regionAt(0.2, 0.2)).toBe("hihat");
+    expect(regionAt(0.8, 0.2)).toBe("crash");
+    expect(regionAt(0.1, 0.8)).toBe("snare");
+    expect(regionAt(0.5, 0.8)).toBe("tom1");
+    expect(regionAt(0.9, 0.8)).toBe("tom2");
   });
 
-  it("pulls a near miss in towards the head's middle", () => {
-    // 1.3 radii out from the snare's middle.
-    const a = aimAlong(down(0.3 + 0.16 * 1.3, -0.3), heads, newAim());
-    expect(a.piece).toBe("snare");
-    const out = Math.hypot(a.point.x - 0.3, a.point.z + 0.3) / 0.16;
-    expect(out).toBeLessThan(1);
-    expect(out).toBeGreaterThan(0.5);
-  });
-
-  it("aims in the air past the reach", () => {
-    const a = aimAlong(
-      down(0.3 + 0.16 * (AIM.reach + 0.2), -0.3),
-      heads,
-      newAim(),
-    );
-    expect(a.piece).toBeNull();
-    expect(a.point.y).toBeCloseTo(AIM.restHeight);
-  });
-
-  it("picks the nearer head (in radii) where two are in reach", () => {
-    expect(aimAlong(down(-0.2, -0.27), heads, newAim()).piece).toBe("tom2");
-    expect(aimAlong(down(0.05, -0.29), heads, newAim()).piece).toBe("snare");
+  it("changes piece only clearly past a border", () => {
+    const m = LAYOUT.margin;
+    // On the snare, wavering just past the line to the tom: still the snare.
+    expect(nextAim("snare", LAYOUT.drums[0] + m * 0.5, 0.8)).toBe("snare");
+    expect(nextAim("snare", LAYOUT.drums[0] + m * 1.5, 0.8)).toBe("tom1");
+    // Up from the snare a little: still the snare; well up: the hi-hat.
+    expect(nextAim("snare", 0.2, LAYOUT.row - m * 0.5)).toBe("snare");
+    expect(nextAim("snare", 0.2, LAYOUT.row - m * 1.5)).toBe("hihat");
+    expect(nextAim(null, 0.2, 0.2)).toBe("hihat");
   });
 });
 
-describe("aim hold", () => {
-  const PALM = 0.2;
-  const step = (h: AimHold, y: number, speed: number, n = 1, x = 0) => {
-    for (let i = 0; i < n; i += 1) h.update(1 / 30, x, y, speed, PALM);
-  };
-
-  it("follows a hand that moves slowly", () => {
-    const h = new AimHold();
-    step(h, 0, 0);
-    step(h, 0.3, 1, 30);
-    expect(h.y).toBeCloseTo(0.3, 2);
-    expect(h.stroke).toBe(0);
+describe("reach", () => {
+  it("grows to where the hands go, never smaller than its least size", () => {
+    const r = new ReachBox();
+    for (let i = 0; i < 60; i += 1) r.see("left", 0.05, 0.05, 1 / 30);
+    const b = r.box();
+    expect(b.u0).toBeCloseTo(REACH.edge, 2);
+    expect(b.v0).toBeCloseTo(REACH.edge, 2);
+    expect(b.u1).toBeCloseTo(REACH.start.u1);
+    const tiny = new ReachBox();
+    tiny.u0 = 0.45;
+    tiny.u1 = 0.5;
+    const t = tiny.box();
+    expect(t.u1 - t.u0).toBeCloseTo(REACH.minW);
   });
 
-  it("holds the aim through a fast stroke and swings the stick down", () => {
-    const h = new AimHold();
-    step(h, 0.3, 0, 10);
-    // Down one palm in 4 readings, fast.
-    for (let i = 1; i <= 4; i += 1) step(h, 0.3 - (PALM * i) / 4, 8);
-    expect(h.y).toBeCloseTo(0.3, 5);
-    expect(h.stroke).toBeCloseTo(1, 5);
-    // Back up: the stick lifts and the aim stays.
-    step(h, 0.3, 8, 4);
-    expect(h.stroke).toBe(0);
-    expect(h.y).toBeCloseTo(0.3, 3);
+  it("is not stretched by one stray reading", () => {
+    const r = new ReachBox();
+    r.see("left", 0.5, 0.5, 1 / 30);
+    r.see("left", 0.02, 0.5, 1 / 30);
+    r.see("left", 0.5, 0.5, 1 / 30);
+    expect(r.box().u0).toBeGreaterThan(0.15);
+  });
+});
+
+describe("hand aim", () => {
+  it("follows the hand and names the piece under it", () => {
+    const a = new HandAim();
+    for (let i = 0; i < 10; i += 1) a.update(1 / 30, 0.85, 0.2, BOX);
+    expect(a.piece).toBe("crash");
+    // A slow move down (not a stroke) takes the aim with it.
+    for (let i = 1; i <= 40; i += 1)
+      a.update(1 / 30, 0.85, 0.2 + i * 0.0175, BOX);
+    expect(a.piece).toBe("tom2");
   });
 
-  it("moves the aim down after resting low for a moment", () => {
-    const h = new AimHold();
-    step(h, 0.3, 0, 10);
-    step(h, 0.3 - PALM, 9);
-    step(h, 0.3 - PALM, 0.2, Math.ceil(HOLD.release * 30) + 30);
-    expect(h.y).toBeCloseTo(0.3 - PALM, 2);
-    expect(h.stroke).toBeLessThan(0.05);
+  it("follows again after a quick move down that stays down", () => {
+    const a = new HandAim();
+    for (let i = 0; i < 10; i += 1) a.update(1 / 30, 0.85, 0.2, BOX);
+    for (let i = 0; i < 20; i += 1) a.update(1 / 30, 0.85, 0.85, BOX);
+    expect(a.piece).toBe("tom2");
+  });
+
+  it("holds through a quick stroke down from a cymbal", () => {
+    const a = new HandAim();
+    for (let i = 0; i < 10; i += 1) a.update(1 / 30, 0.2, 0.35, BOX);
+    expect(a.piece).toBe("hihat");
+    // Down fast, well into the snare's region, and back up.
+    [0.45, 0.6, 0.72, 0.75, 0.6, 0.45, 0.35].forEach((v) => {
+      a.update(1 / 30, 0.2, v, BOX);
+      expect(a.piece).toBe("hihat");
+    });
   });
 });

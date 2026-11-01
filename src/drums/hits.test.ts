@@ -1,191 +1,120 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  ellipseFromRim,
-  firstZoneOnPath,
   STROKE,
   StrokeDetector,
   strokeVelocity,
-  zoneAt,
   zoneDistance,
   type Zone,
 } from "./hits";
 
-const snare: Zone = { id: "snare", x: 0, y: 0, a: 0.1, b: 0.05, angle: 0 };
-const tom: Zone = { id: "tom1", x: 0, y: 0.2, a: 0.08, b: 0.04, angle: 0 };
-const ZONES = [snare, tom];
-const PALM = 0.1;
 const FPS = 30;
 
-/** Readings of a tip moving from (x, y0) at `speed` palms/s (+ up). */
+/** Readings of a hand moving down (+) or up (−) at `speed` box heights/s. */
 const run = (
   det: StrokeDetector,
-  zones: Zone[],
-  from: { t: number; x: number; y: number },
+  from: { t: number; x?: number; y: number },
   speed: number,
   frames: number,
+  fps = FPS,
 ) => {
   const hits = [];
   let { t, y } = from;
   for (let i = 0; i < frames; i += 1) {
-    const hit = det.push({ t, x: from.x, y, palm: PALM }, zones);
+    const hit = det.push({ t, x: from.x ?? 0, y });
     if (hit) hits.push(hit);
-    t += 1 / FPS;
-    y += (speed * PALM) / FPS;
+    t += 1 / fps;
+    y += speed / fps;
   }
   return { hits, t, y };
 };
 
 describe("zones", () => {
   it("measures distance in zone radii", () => {
-    expect(zoneDistance(snare, 0.1, 0)).toBeCloseTo(1);
-    expect(zoneDistance(snare, 0, 0.05)).toBeCloseTo(1);
-    expect(zoneDistance(snare, 0, 0)).toBe(0);
-    const turned = { ...snare, angle: Math.PI / 2 };
-    expect(zoneDistance(turned, 0, 0.1)).toBeCloseTo(1);
-  });
-
-  it("picks the zone the point is deepest in", () => {
-    const big: Zone = { id: "tom2", x: 0.3, y: 0, a: 0.3, b: 0.3, angle: 0 };
-    // Inside both: nearer the snare's centre (in its radii) than the tom's.
-    expect(zoneAt([big, snare], 0.02, 0)?.id).toBe("snare");
-    expect(zoneAt([big, snare], 0.09, 0)?.id).toBe("tom2");
-    expect(zoneAt([snare], 0.5, 0)).toBeNull();
-  });
-
-  it("fits the ellipse of a rim", () => {
-    const pts: number[] = [];
-    for (let i = 0; i < 16; i += 1) {
-      const a = (i / 16) * Math.PI * 2;
-      // a = 0.2 along 30°, b = 0.05
-      const u = Math.cos(a) * 0.2;
-      const v = Math.sin(a) * 0.05;
-      const c = Math.cos(Math.PI / 6);
-      const s = Math.sin(Math.PI / 6);
-      pts.push(1 + u * c - v * s, 2 + u * s + v * c);
-    }
-    const z = ellipseFromRim("snare", 1, 2, pts);
-    expect(z.a).toBeCloseTo(0.2, 5);
-    expect(z.b).toBeCloseTo(0.05, 5);
-    expect(z.angle).toBeCloseTo(Math.PI / 6, 5);
-  });
-
-  it("finds the first zone along a path, even between readings", () => {
-    expect(firstZoneOnPath(ZONES, [0, 0.4, 0, 0.1, 0, -0.1])?.id).toBe("tom1");
-    expect(firstZoneOnPath(ZONES, [0, 0.12, 0, -0.1])?.id).toBe("snare");
-    expect(firstZoneOnPath(ZONES, [0.5, 0.4, 0.5, -0.4])).toBeNull();
+    const z: Zone = { id: "hihat", x: 0, y: 0, a: 0.1, b: 0.05, angle: 0 };
+    expect(zoneDistance(z, 0.1, 0)).toBeCloseTo(1);
+    expect(zoneDistance(z, 0, 0.05)).toBeCloseTo(1);
+    expect(zoneDistance({ ...z, angle: Math.PI / 2 }, 0, 0.1)).toBeCloseTo(1);
   });
 });
 
 describe("strokes", () => {
-  it("plays once on a fast downward stroke into a head, before reaching it", () => {
+  it("plays once, early in a quick move down", () => {
     const det = new StrokeDetector();
-    // From above the snare (clear of the tom beside it), down at 10 palms/s.
-    const { hits } = run(det, [snare], { t: 0, x: 0, y: 0.12 }, -10, 6);
+    run(det, { t: 0, y: 0.3 }, 0, 5);
+    const { hits } = run(det, { t: 5 / FPS, y: 0.3 }, 3, 8);
     expect(hits).toHaveLength(1);
-    expect(hits[0].piece).toBe("snare");
-    // It fires while the tip is still above the head (y > 0.05 at that time).
-    expect(hits[0].t).toBeLessThan(0.15);
+    // Within the first few readings of the stroke.
+    expect(hits[0].t - 5 / FPS).toBeLessThan(0.15);
   });
 
-  it("ignores slow moves and a single noisy reading", () => {
+  it("also plays at a low reading rate (15 a second)", () => {
     const det = new StrokeDetector();
-    expect(run(det, ZONES, { t: 0, x: 0, y: 0.1 }, -2, 10).hits).toHaveLength(
-      0,
-    );
-    const d2 = new StrokeDetector();
-    d2.push({ t: 0, x: 0, y: 0.03, palm: PALM }, ZONES);
-    d2.push({ t: 1 / 30, x: 0, y: 0.03, palm: PALM }, ZONES);
-    // One reading 0.5 palms lower (15 palms/s) then still: no stroke before it.
+    run(det, { t: 0, y: 0.3 }, 0, 4, 15);
+    expect(run(det, { t: 4 / 15, y: 0.3 }, 3, 5, 15).hits).toHaveLength(1);
+  });
+
+  it("ignores slow drifts, jitter and small dips", () => {
     expect(
-      d2.push(
-        { t: 2 / 30, x: 0, y: 0.03 - 0.5 * PALM * 0.4, palm: PALM },
-        ZONES,
-      ),
-    ).toBeNull();
-  });
-
-  it("ignores small quick gestures and jitter (no real stroke)", () => {
-    // A quick dip of half a palm (a thumbs-up pump), many times.
-    const det = new StrokeDetector();
-    let hits = 0;
+      run(new StrokeDetector(), { t: 0, y: 0.2 }, 0.8, 40).hits,
+    ).toHaveLength(0);
+    const jitter = new StrokeDetector();
+    let n = 0;
+    for (let i = 0; i < 90; i += 1)
+      if (jitter.push({ t: i / FPS, x: 0, y: 0.5 + (i % 2 ? 0.02 : -0.02) }))
+        n += 1;
+    expect(n).toBe(0);
+    // A quick dip of 0.06 box heights, many times.
+    const dips = new StrokeDetector();
+    n = 0;
     let t = 0;
-    for (let k = 0; k < 10; k += 1) {
-      [0, -0.25, -0.5, -0.25, 0].forEach((dy) => {
-        if (det.push({ t, x: 0, y: 0.03 + dy * PALM, palm: PALM }, ZONES))
-          hits += 1;
+    for (let k = 0; k < 10; k += 1)
+      [0, 0.03, 0.06, 0.03, 0].forEach((dy) => {
+        if (dips.push({ t, x: 0, y: 0.5 + dy })) n += 1;
         t += 1 / FPS;
       });
-    }
-    expect(hits).toBe(0);
-    // Jitter: ±0.2 palm, every reading.
-    const d2 = new StrokeDetector();
-    let jit = 0;
-    for (let i = 0; i < 60; i += 1)
-      if (
-        d2.push(
-          { t: i / FPS, x: 0, y: (i % 2 ? 0.2 : -0.2) * PALM, palm: PALM },
-          ZONES,
-        )
-      )
-        jit += 1;
-    expect(jit).toBe(0);
+    expect(n).toBe(0);
   });
 
   it("ignores tracking jumps", () => {
     const det = new StrokeDetector();
-    det.push({ t: 0, x: 0, y: 0.5, palm: PALM }, ZONES);
-    expect(det.push({ t: 1 / 30, x: 0, y: 0, palm: PALM }, ZONES)).toBeNull();
+    det.push({ t: 0, x: 0, y: 0.1 });
+    det.push({ t: 1 / FPS, x: 0, y: 0.1 });
+    expect(det.push({ t: 2 / FPS, x: 0, y: 0.7 })).toBeNull();
+    expect(det.push({ t: 3 / FPS, x: 0, y: 0.72 })).toBeNull();
   });
 
-  it("needs a lift before the next hit, then plays again", () => {
+  it("plays once per stroke, again after a lift", () => {
     const det = new StrokeDetector();
-    const first = run(det, [snare], { t: 0, x: 0, y: 0.12 }, -10, 8);
+    run(det, { t: 0, y: 0.2 }, 0, 4);
+    const first = run(det, { t: 4 / FPS, y: 0.2 }, 3, 6);
     expect(first.hits).toHaveLength(1);
-    // Keep pushing down (past the head): still one hit.
-    const more = run(det, [snare], { t: first.t, x: 0, y: first.y }, -10, 4);
+    // Still coming down: no second hit.
+    const more = run(det, { t: first.t, y: first.y }, 3, 3);
     expect(more.hits).toHaveLength(0);
-    // Lift, then strike again.
-    const up = run(det, [snare], { t: more.t, x: 0, y: more.y }, 8, 18);
+    // Back up, then down again.
+    const up = run(det, { t: more.t, y: more.y }, -3, 6);
     expect(det.armed).toBe(true);
-    const again = run(det, [snare], { t: up.t, x: 0, y: up.y }, -10, 8);
-    expect(again.hits).toHaveLength(1);
+    expect(run(det, { t: up.t, y: up.y }, 3, 6).hits).toHaveLength(1);
+  });
+
+  it("is ready again after the hand rests low a moment", () => {
+    const det = new StrokeDetector();
+    run(det, { t: 0, y: 0.2 }, 0, 4);
+    const first = run(det, { t: 4 / FPS, y: 0.2 }, 3, 6);
+    run(det, { t: first.t, y: first.y }, 0, 12);
+    expect(det.armed).toBe(true);
   });
 
   it("is louder for faster strokes", () => {
     expect(strokeVelocity(STROKE.startSpeed)).toBeCloseTo(STROKE.softest);
     expect(strokeVelocity(STROKE.loudSpeed)).toBeCloseTo(1);
-    expect(strokeVelocity(30)).toBe(1);
-    const soft = run(
-      new StrokeDetector(),
-      [snare],
-      { t: 0, x: 0, y: 0.12 },
-      -7,
-      8,
-    );
-    const hard = run(
-      new StrokeDetector(),
-      [snare],
-      { t: 0, x: 0, y: 0.25 },
-      -14,
-      8,
-    );
-    expect(soft.hits[0].velocity).toBeLessThan(hard.hits[0].velocity);
-  });
-
-  it("lets two sticks hit the same drum", () => {
-    const a = new StrokeDetector();
-    const b = new StrokeDetector();
-    const ha = run(a, [snare], { t: 0, x: -0.05, y: 0.12 }, -10, 6).hits;
-    const hb = run(b, [snare], { t: 0, x: 0.05, y: 0.12 }, -10, 6).hits;
-    expect(ha.map((h) => h.piece)).toEqual(["snare"]);
-    expect(hb.map((h) => h.piece)).toEqual(["snare"]);
-  });
-
-  it("plays the drum the stroke reaches first", () => {
-    const det = new StrokeDetector();
-    // Down through the tom (above) towards the snare: the tom plays.
-    const { hits } = run(det, ZONES, { t: 0, x: 0, y: 0.32 }, -12, 10);
-    expect(hits.map((h) => h.piece)).toEqual(["tom1"]);
+    const soft = new StrokeDetector();
+    run(soft, { t: 0, y: 0.2 }, 0, 4);
+    const hard = new StrokeDetector();
+    run(hard, { t: 0, y: 0.2 }, 0, 4);
+    const s = run(soft, { t: 4 / FPS, y: 0.2 }, 2, 8).hits[0];
+    const h = run(hard, { t: 4 / FPS, y: 0.2 }, 6, 8).hits[0];
+    expect(s.velocity).toBeLessThan(h.velocity);
   });
 });

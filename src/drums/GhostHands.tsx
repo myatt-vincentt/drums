@@ -1,18 +1,15 @@
 // Your hands, as two ghost hands holding drumsticks over the kit.
 //
-// Each tracked hand steers its ghost (your left hand the ghost on the
-// hi-hat side): where your hand is on the camera picture is where the stick
-// aims on the kit as seen from the seat (see aim.ts), and a quick move down
-// swings the stick down onto the head it was over. The stick pivots in the
-// ghost's grip, so a stroke visibly whacks the head; at the hit it touches
-// the head even if the camera is a moment behind.
-//
-// Hits: a fast downward stroke plays the aimed piece at the start of the
-// stroke, louder for faster strokes, once per stroke (hits.ts). A stick
+// Where your hand is on the camera picture picks the piece it aims at (see
+// aim.ts: the cymbals up high, the drums below, over your own reach). The
+// ghost's stick tip hovers over that piece and the piece glows softly, so
+// you always see what you'll hit. A quick move down (a stroke) plays the
+// aimed piece at the start of the stroke, louder for faster strokes, once
+// per stroke (hits.ts); the stick whacks the head and rebounds. A stick
 // resting still on the hi-hat closes it (hihat.ts).
 //
-// With no hand in view the ghosts rest over the hi-hat and the snare, and a
-// tap on a piece swings the nearer one onto it (PointerInput.tsx).
+// With no hand in view the ghosts rest over the snare and the floor tom,
+// and a tap on a piece swings the nearer one onto it (PointerInput.tsx).
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
@@ -26,28 +23,27 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
-  Ray,
   Vector3,
   type Object3D,
 } from "three";
 // eslint-disable-next-line import/extensions
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 
-import { aimAlong, AimHold, type Aim } from "./aim";
+import { HandAim, ReachBox, REGIONS, type Box, type StickPiece } from "./aim";
 import { ghostMaterial, placeGhost, readGhost, type Ghost } from "./ghost";
 import type { HatInput } from "./hihat";
 import { whack, WHACK_LENGTH } from "./fx";
-import { StrokeDetector } from "./hits";
+import { StrokeDetector, strokeUnit } from "./hits";
+import { HandPairer, type Side } from "./pair";
+import { handTracking } from "./tracking";
 import { dressModel } from "./look";
 import { MODELS } from "./models";
-import { STICK_PIECES, type PieceId } from "./pieces";
+import type { PieceId } from "./pieces";
 import { drums, hatChanged, headOf, strike, useDrumsVersion } from "./state";
 
 useGLTF.preload(MODELS.ghostLeft);
 useGLTF.preload(MODELS.ghostRight);
 
-/** Hand readings per second: strokes are quick, so more than usual. */
-const HAND_FPS = 30;
 /** The tip hovers this far above the head between strokes (m). */
 const HOVER = 0.16;
 /** Over a cymbal the tip hovers lower, so the hand stays near it. */
@@ -78,41 +74,39 @@ const CLEAR_SIDE = 0.07;
 const CLEAR_UP = 0.13;
 /** Cymbals are played near the edge on your side (share of the radius). */
 const CYMBAL_EDGE = 0.5;
-/** With no head aimed at, the aim stays over the kit (m, around its middle). */
-const AIR = { x: 0.7, zNear: -0.45, zFar: 0.15 };
 /** Where each ghost rests with no hand in view. */
 const REST: Record<Side, PieceId> = { left: "snare", right: "tom2" };
-/**
- * The part of the camera picture your hands play in (tracker units, x right,
- * y up), stretched over the kit as seen from the seat.
- */
-const HAND_BOX = { x0: -0.75, x1: 0.75, y0: -0.75, y1: 0.25 };
-/** The kit's playing area is widened by this share on each side. */
-const KIT_PAD = 0.18;
+/** Over a drum the tip wanders this far from the middle (share of the radius) with your hand. */
+const WANDER = 0.35;
 /** A tap's swing down to the head (s); then the whack and rebound (fx.ts). */
 const SWING_DOWN = 0.05;
-/** The wrist's part in a stroke: from this tilt (rad), full over this, at most this much. */
-const WRIST = { from: 0.08, full: 0.5, most: 0.6 };
-/** The smallest hand size used for speeds (screen heights). */
-const MIN_PALM = 0.045;
+/** A stroke on its way down tips the stick this far (1 = on the head) at full speed. */
+const WIND = 0.45;
 /** Follow rate of the drawn aim point (1/s). */
 const DRAW_FOLLOW = 22;
+/** A hand not seen for this long (ms) is gone. */
+const LOST_MS = 600;
+/** The hand's place on the picture: the wrist and the four knuckles. */
+const PALM = [0, 5, 9, 13, 17];
 
-type Side = "left" | "right";
 const SIDES: Side[] = ["left", "right"];
 
 type GhostState = {
   ghost: Ghost | null;
   detector: StrokeDetector;
-  hold: AimHold;
-  aim: Aim;
+  aim: HandAim;
+  /** The aimed piece (null with no hand in view). */
+  piece: PieceId | null;
+  /** The aim on the piece's head (world), before the cymbal edge. */
+  target: Vector3;
+  targetNormal: Vector3;
   /** The drawn aim point and normal (eased). */
   point: Vector3;
   normal: Vector3;
-  stamp: number;
+  /** The last reading's time (s) and when it came (performance.now()). */
+  t: number;
   lastSeen: number;
   tracked: boolean;
-  palm: number;
   /** A tap's swing at a piece. */
   swing: {
     piece: PieceId;
@@ -124,20 +118,19 @@ type GhostState = {
   hitAt: number;
   hitV: number;
   hat: HatInput;
-  /** The wrist's tilt (knuckles up, radians) and its slow average. */
-  tilt: number;
-  tiltBase: number;
   /** The hand on the camera picture (0..1, v down), and how shown (0..1). */
   u: number;
   v: number;
   shown: number;
+  /** The hand's 21 points on the picture (u, v pairs), for the corner camera. */
+  points: Float32Array;
 };
 
 /** Development only: where each ghost rests instead (a piece), and a stroke. */
 export const devRest: Partial<Record<Side, PieceId>> = {};
 export const devStroke: Partial<Record<Side, number>> = {};
 
-/** Development only: pretend hands (tracker units, palm in screen heights). */
+/** Development only: pretend hands (tracker units: x right, y up, -1..1). */
 export const devHands: Partial<
   Record<Side, { x: number; y: number; palm: number; stamp: number } | null>
 > = {};
@@ -145,34 +138,44 @@ export const devHands: Partial<
 const newState = (side: Side): GhostState => ({
   ghost: null,
   detector: new StrokeDetector(),
-  hold: new AimHold(),
-  aim: {
-    piece: null,
-    point: new Vector3(),
-    normal: new Vector3(0, 1, 0),
-    reach: 0,
-  },
+  aim: new HandAim(),
+  piece: null,
+  target: new Vector3(),
+  targetNormal: new Vector3(0, 1, 0),
   point: new Vector3(),
   normal: new Vector3(0, 1, 0),
-  stamp: -1,
+  t: -1,
   lastSeen: -1e9,
   tracked: false,
-  palm: 0,
   swing: null,
   hitAt: -1e9,
   hitV: 0,
   hat: { id: side, present: false, x: 0, y: 0, speed: 0 },
-  tilt: 0,
-  tiltBase: Number.NaN,
   u: 0.5,
   v: 0.5,
   shown: 0,
+  points: new Float32Array(42),
 });
 
 export const ghosts: Record<Side, GhostState> = {
   left: newState("left"),
   right: newState("right"),
 };
+
+/** Your reach on the camera picture (the corner camera draws it). */
+export const reach = new ReachBox();
+export const reachBox: Box = reach.box();
+const pairer = new HandPairer();
+
+/** Development only: the hits by hand, with the hand's place (for testing). */
+export const devTrace: Array<{
+  t: number;
+  side: Side;
+  piece: PieceId;
+  velocity: number;
+  u: number;
+  v: number;
+}> = [];
 
 /** A tap on a piece: the nearer ghost swings onto it. */
 export const swingAt = (piece: PieceId, at: Vector3 | null, velocity = 0.7) => {
@@ -197,17 +200,16 @@ export const swingAt = (piece: PieceId, at: Vector3 | null, velocity = 0.7) => {
 
 const ease = (t: number) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
 
-const ray = new Ray();
-const stickHeads: typeof drums.heads = [];
 const tmp = new Vector3();
 const flat = new Vector3();
 const dir = new Vector3();
 const grip = new Vector3();
 const back = new Vector3();
-const proj = new Vector3();
 const aimTarget = new Vector3();
+const aimNormal = new Vector3();
 const hitPoint = new Vector3();
 const tipNow = new Vector3();
+const side3 = new Vector3();
 /** The stick's trail: copies, their colour and opacities, and the tip speeds (m/s) it shows from and is full at. */
 const TRAIL = {
   copies: 3,
@@ -217,60 +219,25 @@ const TRAIL = {
   full: 3,
 };
 
-/** The kit's playing area on the seat's view (NDC box of the stick pieces). */
-const kitBox = { x0: -0.6, x1: 0.6, y0: -0.8, y1: 0.1 };
-const updateKitBox = () => {
-  const { seat } = drums;
-  if (!seat) return;
-  let x0 = Infinity;
-  let x1 = -Infinity;
-  let y0 = Infinity;
-  let y1 = -Infinity;
-  drums.heads.forEach((h) => {
-    if (!STICK_PIECES.includes(h.id)) return;
-    proj.copy(h.center).project(seat);
-    x0 = Math.min(x0, proj.x);
-    x1 = Math.max(x1, proj.x);
-    y0 = Math.min(y0, proj.y);
-    y1 = Math.max(y1, proj.y);
-  });
-  if (!Number.isFinite(x0)) return;
-  const px = (x1 - x0) * KIT_PAD;
-  const py = (y1 - y0) * KIT_PAD;
-  Object.assign(kitBox, { x0: x0 - px, x1: x1 + px, y0: y0 - py, y1: y1 + py });
+/**
+ * The aim on a piece's head: its middle, moved a little with your hand
+ * inside the piece's region, so the tip feels alive but never leaves it.
+ */
+const aimOnHead = (st: GhostState, piece: StickPiece) => {
+  const h = headOf(piece);
+  if (!h) return;
+  const [x0, x1, y0, y1] = REGIONS[piece];
+  const rx = Math.min(1, Math.max(0, (st.aim.x - x0) / (x1 - x0))) - 0.5;
+  const ry = Math.min(1, Math.max(0, (st.aim.y - y0) / (y1 - y0))) - 0.5;
+  // Across the kit (your left is +x from the seat) and far / near.
+  side3.set(1, 0, 0).addScaledVector(h.normal, -h.normal.x).normalize();
+  flat.crossVectors(side3, h.normal).normalize();
+  st.target
+    .copy(h.center)
+    .addScaledVector(side3, -rx * 2 * WANDER * h.radius)
+    .addScaledVector(flat, -ry * 2 * WANDER * h.radius);
+  st.targetNormal.copy(h.normal);
 };
-
-/** Tracker point → the seat view (NDC), and its scale (NDC per tracker unit). */
-const toSeat = (gx: number, gy: number) => {
-  const sx = (kitBox.x1 - kitBox.x0) / (HAND_BOX.x1 - HAND_BOX.x0);
-  const sy = (kitBox.y1 - kitBox.y0) / (HAND_BOX.y1 - HAND_BOX.y0);
-  return {
-    x: kitBox.x0 + (gx - HAND_BOX.x0) * sx,
-    y: kitBox.y0 + (gy - HAND_BOX.y0) * sy,
-    sy,
-  };
-};
-
-/** The aim through a point of the seat's view. */
-/* eslint-disable no-param-reassign */
-const aimFrom = (x: number, y: number, out: Aim) => {
-  const { seat } = drums;
-  if (!seat) return out;
-  ray.origin.setFromMatrixPosition(seat.matrixWorld);
-  ray.direction.set(x, y, 0.5).unproject(seat).sub(ray.origin).normalize();
-  stickHeads.length = 0;
-  drums.heads.forEach((h) => {
-    if (STICK_PIECES.includes(h.id)) stickHeads.push(h);
-  });
-  aimAlong(ray, stickHeads, out);
-  // In the air: stay over the kit.
-  if (!out.piece) {
-    out.point.x = Math.max(-AIR.x, Math.min(AIR.x, out.point.x));
-    out.point.z = Math.max(AIR.zNear, Math.min(AIR.zFar, out.point.z));
-  }
-  return out;
-};
-/* eslint-enable no-param-reassign */
 
 const probe = new Vector3();
 const tipAt = new Vector3();
@@ -298,8 +265,8 @@ const poseStick = (st: GhostState, side: Side, stroke: number) => {
   const L = g.tipLength;
   // The tip at rest, hovering over the aim point.
   const cymbal =
-    st.aim.piece === "hihat" ||
-    st.aim.piece === "crash" ||
+    st.piece === "hihat" ||
+    st.piece === "crash" ||
     st.swing?.piece === "hihat" ||
     st.swing?.piece === "crash";
   const hover = cymbal ? HOVER_CYMBAL : HOVER;
@@ -322,8 +289,8 @@ const poseStick = (st: GhostState, side: Side, stroke: number) => {
   let gripY = Math.max(rest.y + L * Math.sin(REST_SLOPE), GRIP_MIN_Y);
   for (let i = 0; i < 3; i += 1) {
     const drop = Math.min(L * 0.97, gripY - rest.y);
-    const reach = Math.sqrt(L * L - drop * drop);
-    grip.copy(rest).addScaledVector(flat, -reach);
+    const along = Math.sqrt(L * L - drop * drop);
+    grip.copy(rest).addScaledVector(flat, -along);
     grip.y = gripY;
     dir.copy(rest).sub(grip).normalize();
     let lift = 0;
@@ -410,6 +377,8 @@ export const GhostHands = () => {
     return out;
   }, [leftGltf, rightGltf]);
   const started = useRef(false);
+  const lastStamp = useRef({ ms: -1, t: -1 }).current;
+  const fakeStamp = useRef<Partial<Record<Side, number>>>({}).current;
   // The stick's motion trail: faint copies at its last few places, shown
   // only while it moves fast (a stroke).
   const trails = useMemo(() => {
@@ -447,142 +416,149 @@ export const GhostHands = () => {
   useFrame((_, rawDt) => {
     const dt = Math.min(rawDt, 0.1);
     if (!drums.seat || drums.heads.length === 0) return;
-    updateKitBox();
     const nowMs = performance.now();
-    const { aspect } = drums;
+
+    // This frame's new hand readings (picture u, v down; 21 points each).
+    const readings: Array<{
+      u: number;
+      v: number;
+      size: number;
+      pts: ArrayLike<number> | null;
+    }> = [];
+    let stampMs = -1;
+    if (devHands.left !== undefined || devHands.right !== undefined) {
+      SIDES.forEach((side) => {
+        const f = devHands[side];
+        if (!f || f.stamp === fakeStamp[side]) return;
+        fakeStamp[side] = f.stamp;
+        stampMs = f.stamp;
+        readings.push({
+          u: f.x * 0.5 + 0.5,
+          v: 0.5 - f.y * 0.5,
+          size: 0,
+          pts: null,
+        });
+      });
+    } else if (drums.handsOn && node?.poses) {
+      const { poses } = node;
+      SIDES.forEach((side) => {
+        const pose = poses[side];
+        if (!pose || pose.held || pose.timestampMs <= lastStamp.ms) return;
+        stampMs = Math.max(stampMs, pose.timestampMs);
+        const img = pose.image;
+        let u = 0;
+        let v = 0;
+        PALM.forEach((i) => {
+          u += img[i].x * 0.5 + 0.5;
+          v += 0.5 - img[i].y * 0.5;
+        });
+        const pts = new Float32Array(42);
+        for (let i = 0; i < 21; i += 1) {
+          pts[i * 2] = img[i].x * 0.5 + 0.5;
+          pts[i * 2 + 1] = 0.5 - img[i].y * 0.5;
+        }
+        // The hand's size: wrist to middle knuckle (picture heights).
+        const size = Math.hypot(
+          (img[0].x - img[9].x) * 0.5,
+          (img[0].y - img[9].y) * 0.5,
+        );
+        readings.push({ u: u / PALM.length, v: v / PALM.length, size, pts });
+      });
+    }
+    if (stampMs > 0) {
+      lastStamp.ms = stampMs;
+      const t = stampMs / 1000;
+      // Which hand is which: by where each was.
+      const slot = pairer.update(t, readings);
+      reach.relax(lastStamp.t > 0 ? t - lastStamp.t : 0);
+      lastStamp.t = t;
+      SIDES.forEach((side) => {
+        const i = slot[side];
+        if (i < 0) return;
+        const st = ghosts[side];
+        const r = readings[i];
+        const rdt = st.t > 0 ? Math.min(0.2, t - st.t) : 1 / 30;
+        st.t = t;
+        st.u = r.u;
+        st.v = r.v;
+        if (r.pts) st.points.set(r.pts);
+        else
+          for (let k = 0; k < 21; k += 1) {
+            st.points[k * 2] = r.u;
+            st.points[k * 2 + 1] = r.v;
+          }
+        st.lastSeen = nowMs;
+        st.tracked = true;
+        reach.see(side, r.u, r.v, rdt);
+        reach.box(reachBox);
+        const h = strokeUnit(reachBox.v1 - reachBox.v0);
+        // The stroke is read before the aim takes this reading, so a stroke
+        // plays the piece aimed at just before it.
+        const { piece } = st.aim;
+        const hit = st.detector.push({
+          t,
+          x: (r.u - reachBox.u0) / h,
+          y: (r.v - reachBox.v0) / h,
+        });
+        st.piece = st.aim.update(rdt, r.u, r.v, reachBox);
+        aimOnHead(st, st.piece);
+        const played = piece ?? st.piece;
+        if (hit) {
+          st.hitAt = nowMs;
+          st.hitV = hit.velocity;
+          if (piece !== st.piece) aimOnHead(st, played);
+          strike(
+            played,
+            hit.velocity,
+            side,
+            playPoint(played, side, st.target, hitPoint),
+          );
+          if (import.meta.env.DEV) {
+            devTrace.push({
+              t: Math.round(nowMs),
+              side,
+              piece: played,
+              velocity: Number(hit.velocity.toFixed(2)),
+              u: Number(r.u.toFixed(3)),
+              v: Number(r.v.toFixed(3)),
+            });
+            if (devTrace.length > 400) devTrace.shift();
+          }
+        }
+      });
+    }
 
     SIDES.forEach((side) => {
       const st = ghosts[side];
-      const fake = devHands[side];
-      // With hand tracking off the ghosts rest (taps still swing them).
-      const pose = drums.handsOn ? (node?.poses?.[side] ?? null) : null;
-      let reading: {
-        gx: number;
-        gy: number;
-        palm: number;
-        stamp: number;
-        tilt: number;
-      } | null = null;
-      if (fake !== undefined) {
-        if (fake)
-          reading = {
-            gx: fake.x,
-            gy: fake.y,
-            palm: fake.palm,
-            stamp: fake.stamp,
-            tilt: 0,
-          };
-      } else if (pose && !pose.held) {
-        const img = pose.image;
-        let gx = 0;
-        let gy = 0;
-        [2, 5, 9, 13, 17].forEach((i) => {
-          gx += img[i].x;
-          gy += img[i].y;
-        });
-        const d = (a: number, b: number) =>
-          Math.hypot(
-            (img[a].x - img[b].x) * 0.5 * aspect,
-            (img[a].y - img[b].y) * 0.5,
-          );
-        reading = {
-          gx: gx / 5,
-          gy: gy / 5,
-          palm: Math.max(d(0, 9), d(5, 17) * 1.15),
-          stamp: pose.timestampMs,
-          // Knuckles up or down: the wrist's part in a stroke.
-          tilt: Math.atan2(
-            pose.world[9].y - pose.world[0].y,
-            Math.hypot(
-              pose.world[9].x - pose.world[0].x,
-              pose.world[9].z - pose.world[0].z,
-            ),
-          ),
-        };
-      }
-
-      st.shown += ((reading ? 1 : 0) - st.shown) * (1 - Math.exp(-dt * 12));
-      if (reading) {
-        st.u = reading.gx * 0.5 + 0.5;
-        st.v = 0.5 - reading.gy * 0.5;
-        st.lastSeen = nowMs;
-        st.tracked = true;
-        if (reading.stamp !== st.stamp) {
-          const prevStamp = st.stamp;
-          st.stamp = reading.stamp;
-          const p = Math.max(MIN_PALM, reading.palm);
-          st.palm = st.palm
-            ? st.palm + (p - st.palm) * (p > st.palm ? 0.35 : 0.12)
-            : p;
-          const t = reading.stamp / 1000;
-          st.tilt = reading.tilt;
-          st.tiltBase = Number.isNaN(st.tiltBase)
-            ? reading.tilt
-            : st.tiltBase + (reading.tilt - st.tiltBase) * 0.06;
-          const seat = toSeat(reading.gx, reading.gy);
-          const rdt =
-            prevStamp > 0
-              ? Math.min(0.2, (reading.stamp - prevStamp) / 1000)
-              : 1 / 30;
-          // Speeds in palm lengths, on the camera picture (screen heights).
-          const hit = st.detector.push(
-            {
-              t,
-              x: reading.gx * 0.5 * aspect,
-              y: reading.gy * 0.5,
-              palm: st.palm,
-            },
-            () => st.aim.piece,
-          );
-          st.hold.update(
-            rdt,
-            seat.x,
-            seat.y,
-            st.detector.speed,
-            st.palm * 2 * seat.sy,
-          );
-          aimFrom(st.hold.x, st.hold.y, st.aim);
-          if (hit) {
-            st.hitAt = nowMs;
-            st.hitV = hit.velocity;
-            strike(
-              hit.piece,
-              hit.velocity,
-              side,
-              playPoint(hit.piece, side, st.aim.point, hitPoint),
-            );
-          }
-        }
-      } else if (nowMs - st.lastSeen > 250) {
+      const seen = st.tracked && nowMs - st.lastSeen <= LOST_MS;
+      st.shown +=
+        ((seen && nowMs - st.lastSeen < 150 ? 1 : 0) - st.shown) *
+        (1 - Math.exp(-dt * 12));
+      if (st.tracked && !seen) {
         st.tracked = false;
         st.detector.reset();
-        st.hold.reset();
-        st.palm = 0;
-        st.tiltBase = Number.NaN;
+        st.aim.reset();
+        reach.lose(side);
       }
 
       // Not tracked: rest over this side's piece.
       if (!st.tracked) {
+        st.piece = null;
         const h = headOf(devRest[side] ?? REST[side]);
         if (h) {
-          st.aim.piece = h.id;
-          st.aim.point.copy(h.center);
-          st.aim.normal.copy(h.normal);
+          st.target.copy(h.center);
+          st.targetNormal.copy(h.normal);
         }
       }
+      const restPiece = st.tracked ? st.piece : (devRest[side] ?? REST[side]);
 
+      // On the way down a stroke tips the stick (until the hit's whack).
+      let stroke = st.tracked
+        ? Math.min(WIND, Math.max(0, st.detector.down / 4))
+        : (devStroke[side] ?? 0);
       // A tap's swing overrides the aim for a moment.
-      let stroke = st.tracked ? st.hold.stroke : (devStroke[side] ?? 0);
-      // A flick of the wrist (knuckles down) tips the stick down too.
-      if (st.tracked && !Number.isNaN(st.tiltBase)) {
-        const flick = Math.min(
-          WRIST.most,
-          Math.max(0, (st.tiltBase - st.tilt - WRIST.from) / WRIST.full),
-        );
-        stroke = Math.min(1.15, stroke + flick);
-      }
-      const target = playPoint(st.aim.piece, side, st.aim.point, aimTarget);
-      const targetNormal = st.aim.normal;
+      const target = playPoint(restPiece, side, st.target, aimTarget);
+      const targetNormal = aimNormal.copy(st.targetNormal);
       if (st.swing) {
         const e = (nowMs - st.swing.at) / 1000;
         if (e > SWING_DOWN + WHACK_LENGTH + 0.1) st.swing = null;
@@ -640,7 +616,8 @@ export const GhostHands = () => {
       st.hat.present = st.tracked && !!hatHead;
       st.hat.x = st.point.x;
       st.hat.y = st.point.y + HOVER * (1 - stroke);
-      st.hat.speed = st.detector.speed;
+      // (box heights/s → about palms/s)
+      st.hat.speed = st.detector.speed * 3;
     });
     started.current = true;
 
@@ -667,7 +644,7 @@ export const GhostHands = () => {
   return (
     <>
       {drums.started && drums.handsOn ? (
-        <HandTracker targetFps={HAND_FPS} />
+        <HandTracker targetFps={handTracking().targetFps} />
       ) : null}
       <primitive object={models.left.root} />
       <primitive object={models.right.root} />

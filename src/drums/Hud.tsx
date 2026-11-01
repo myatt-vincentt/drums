@@ -278,12 +278,22 @@ const PicHands = () => (
     />
   </Pic>
 );
-/** A closed fist, knuckles up. */
-const PicFist = () => (
+/** The camera picture split like the kit: two cymbals above, three drums below, one lit. */
+const PicAim = () => (
   <Pic>
-    <path d="M5.5 11a2 2 0 0 1 2-2h8.5a2.5 2.5 0 0 1 2.5 2.5v3.5a5.5 5.5 0 0 1-5.5 5.5h-2a5.5 5.5 0 0 1-5.5-5.5z" />
-    <path d="M9.5 9v3M12.5 9v3M15.5 9.1v2.9" />
-    <path d="M5.5 13h5a1.6 1.6 0 0 1 0 3.2H9" />
+    <rect x="1.5" y="3.5" width="21" height="17" rx="3" opacity=".5" />
+    <path d="M1.5 12h21M12 3.5V12M8.5 12v8.5M15.5 12v8.5" opacity=".5" />
+    <rect
+      x="2.6"
+      y="13.1"
+      width="4.8"
+      height="6.3"
+      rx="1.2"
+      fill="currentColor"
+      stroke="none"
+      opacity=".35"
+    />
+    <circle cx="5" cy="15.2" r="1.3" fill="currentColor" stroke="none" />
   </Pic>
 );
 /** A stick coming down onto a drum. */
@@ -315,8 +325,8 @@ const PicKick = () => (
 
 const STEPS: { pic: ReactNode; text: string }[] = [
   { pic: <PicHands />, text: "Show both hands" },
-  { pic: <PicFist />, text: "Make fists" },
-  { pic: <PicStrike />, text: "Strike down at a drum" },
+  { pic: <PicAim />, text: "Move over a drum: it glows" },
+  { pic: <PicStrike />, text: "Strike down to play it" },
   { pic: <PicKick />, text: "Nod or tap for the kick" },
 ];
 

@@ -1,16 +1,17 @@
-// Stick hits, worked out on the screen.
+// Stick strokes, from your hand's motion on the camera picture.
 //
-// Every head (and cymbal) is drawn on screen as an ellipse, its "zone". A
-// stick tip that moves down fast into a zone hits that piece. The hit fires
-// at the START of the stroke: as soon as the tip is moving down fast and its
-// path (from the last reading, a little way ahead along its motion) enters a
-// zone. That hides the camera and tracking delay, so the sound lands about
-// when the stick would meet the head. How fast the stroke is sets how loud
-// it plays. A stick plays once per stroke and is ready again when it lifts.
+// A stroke is a quick move of the hand down. It plays at its START: as soon
+// as the hand is clearly moving down fast, after coming down a little way.
+// That hides the camera and tracking delay, so the sound lands about when
+// the stick would meet the head. How fast the stroke is sets how loud it
+// plays. A hand plays once per stroke and is ready again once it lifts (or
+// rests a moment). Slow drifts, small wobbles and the jumps of a lost hand
+// never play.
 //
-// Units: screen heights, x right, y up, origin at the screen centre. Speeds
-// are in palm lengths per second, so a hand far from the camera (small on
-// screen) plays the same as one close up.
+// Units: the reach box (aim.ts): x across and y DOWN, 1 = the box's height
+// (strokeUnit), so a small reach plays the same as a big one; a box not yet
+// grown (someone barely moving) counts as a usual reach, so small gestures
+// never play.
 import type { PieceId } from "./pieces";
 
 /** A head on screen: an ellipse with semi-axes `a` (along `angle`) and `b`. */
@@ -23,31 +24,6 @@ export type Zone = {
   angle: number;
 };
 
-export const STROKE = {
-  /** Downward speed (palms/s) that starts a stroke… */
-  startSpeed: 6,
-  /** …after the hand has come down at least this far (palms) from its top. */
-  minTravel: 0.7,
-  /** The top fades this fast (palms/s), so a slow drift down never adds up. */
-  topFade: 2,
-  /** Downward speed that plays at full loudness. */
-  loudSpeed: 14,
-  /** How far ahead along the motion (s) the path looks for a head. */
-  lead: 0.07,
-  /** A lift of this many palms above the lowest point re-arms the stick. */
-  rearmRise: 0.6,
-  /** Shortest time between two hits of one stick (s). */
-  minGap: 0.08,
-  /** A move of more palms than this in one reading is a tracking jump. */
-  maxJump: 2.5,
-  /** Readings further apart than this (s) don't make a speed. */
-  maxDt: 0.15,
-  /** The softest stroke's loudness (0..1). */
-  softest: 0.15,
-};
-
-const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
-
 /** How far a point is from a zone's centre, in zone radii (1 = on the rim). */
 export const zoneDistance = (z: Zone, px: number, py: number) => {
   const dx = px - z.x;
@@ -59,108 +35,62 @@ export const zoneDistance = (z: Zone, px: number, py: number) => {
   return Math.hypot(u / Math.max(1e-6, z.a), v / Math.max(1e-6, z.b));
 };
 
-/** The zone a point is in (the one it is deepest in), or null. */
-export const zoneAt = (
-  zones: readonly Zone[],
-  px: number,
-  py: number,
-  limit = 1,
-): Zone | null => {
-  let best: Zone | null = null;
-  let bestD = limit;
-  for (let i = 0; i < zones.length; i += 1) {
-    const d = zoneDistance(zones[i], px, py);
-    if (d <= bestD) {
-      bestD = d;
-      best = zones[i];
-    }
-  }
-  return best;
+export const STROKE = {
+  /** Downward speed (box heights/s) that starts a stroke… */
+  startSpeed: 1.4,
+  /** …after the hand has come down at least this far from its recent top. */
+  minTravel: 0.1,
+  /** …moving more down than sideways (down ÷ sideways at least this). */
+  downRatio: 0.4,
+  /** The top fades this fast (box heights/s), so a slow drift never adds up. */
+  topFade: 0.5,
+  /** Downward speed that plays at full loudness. */
+  loudSpeed: 5,
+  /** A lift this far above the lowest point re-arms the hand… */
+  rearmRise: 0.06,
+  /** …or no longer coming down (slower than `restSpeed`) for this long (s)… */
+  rearmRest: 0.15,
+  restSpeed: 0.3,
+  /** …or coming back after this long out of sight (s)… */
+  lostRearm: 0.25,
+  /** …or this long (s) after the hit, once it is no longer coming down fast. */
+  rearmAfter: 0.3,
+  /** Shortest time between two hits of one hand (s). */
+  minGap: 0.12,
+  /** A move further than this (box heights) in one reading, and faster than
+   * `maxSpeed` (box heights/s), is a tracking jump. */
+  maxJump: 0.35,
+  maxSpeed: 9,
+  /** Speeds are measured over at least this long (s). */
+  window: 0.06,
+  /** Readings further apart than this (s) don't make a speed. */
+  maxDt: 0.15,
+  /** The softest stroke's loudness (0..1). */
+  softest: 0.15,
 };
 
-/**
- * The ellipse through a ring of points around a centre (a head's rim seen on
- * screen): its axes from the points' spread. `pts` is x, y pairs, evenly
- * spaced round the rim.
- */
-export const ellipseFromRim = (
-  id: PieceId,
-  cx: number,
-  cy: number,
-  pts: ArrayLike<number>,
-): Zone => {
-  const n = Math.floor(pts.length / 2);
-  let sxx = 0;
-  let syy = 0;
-  let sxy = 0;
-  for (let i = 0; i < n; i += 1) {
-    const dx = pts[i * 2] - cx;
-    const dy = pts[i * 2 + 1] - cy;
-    sxx += dx * dx;
-    syy += dy * dy;
-    sxy += dx * dy;
-  }
-  sxx /= Math.max(1, n);
-  syy /= Math.max(1, n);
-  sxy /= Math.max(1, n);
-  // Eigenvalues of the spread; points round an ellipse spread a² / 2.
-  const tr = sxx + syy;
-  const det = sxx * syy - sxy * sxy;
-  const disc = Math.sqrt(Math.max(0, (tr * tr) / 4 - det));
-  const l1 = tr / 2 + disc;
-  const l2 = Math.max(0, tr / 2 - disc);
-  const angle = 0.5 * Math.atan2(2 * sxy, sxx - syy);
-  return {
-    id,
-    x: cx,
-    y: cy,
-    a: Math.sqrt(2 * l1),
-    b: Math.sqrt(2 * l2),
-    angle,
-  };
-};
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
-/**
- * The first zone met along a path of points (x, y pairs): each segment is
- * walked in small steps, so a fast tip that jumps over the edge between two
- * readings still counts.
- */
-export const firstZoneOnPath = (
-  zones: readonly Zone[],
-  path: readonly number[],
-  steps = 4,
-): Zone | null => {
-  const n = Math.floor(path.length / 2);
-  if (n === 0) return null;
-  const first = zoneAt(zones, path[0], path[1]);
-  if (first) return first;
-  for (let i = 1; i < n; i += 1) {
-    const x0 = path[(i - 1) * 2];
-    const y0 = path[(i - 1) * 2 + 1];
-    const x1 = path[i * 2];
-    const y1 = path[i * 2 + 1];
-    for (let k = 1; k <= steps; k += 1) {
-      const t = k / steps;
-      const z = zoneAt(zones, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
-      if (z) return z;
-    }
-  }
-  return null;
-};
+/** The usual reach's height on the picture (the least unit of a stroke). */
+export const MIN_UNIT = 0.65;
 
-/** One reading of a stick: its tip, and the hand's palm length (screen heights). */
-export type StickSample = { t: number; x: number; y: number; palm: number };
+/** The unit of hand moves for a reach box this tall (picture heights). */
+export const strokeUnit = (boxHeight: number) => Math.max(MIN_UNIT, boxHeight);
+
+/** One reading of a hand: where it is in the reach box (y down). */
+export type HandSample = { t: number; x: number; y: number };
 
 export type StrokeHit = {
-  piece: PieceId;
   /** Loudness 0..1. */
   velocity: number;
-  /** The stroke's downward speed (palms/s). */
+  /** The stroke's downward speed (box heights/s). */
   speed: number;
+  /** Its sideways speed (box heights/s). */
+  side: number;
   t: number;
 };
 
-/** Loudness (0..1) of a stroke from its downward speed (palms/s). */
+/** Loudness (0..1) of a stroke from its downward speed. */
 export const strokeVelocity = (speed: number) => {
   const k = clamp01(
     (speed - STROKE.startSpeed) / (STROKE.loudSpeed - STROKE.startSpeed),
@@ -168,106 +98,107 @@ export const strokeVelocity = (speed: number) => {
   return STROKE.softest + (1 - STROKE.softest) * k ** 0.85;
 };
 
-/** Watches one stick's readings and calls out its hits. */
+/** Watches one hand's readings and calls out its strokes. */
 export class StrokeDetector {
   /** Ready for a hit (it has lifted since the last one). */
   armed = true;
 
-  /** The tip's current speed in any direction (palms/s). */
+  /** The hand's current speed in any direction (box heights/s). */
   speed = 0;
 
-  private prev: StickSample | null = null;
+  /** Its downward speed (box heights/s). */
+  down = 0;
 
-  private prevDown = 0;
+  /** The last few readings (speeds are measured over `STROKE.window`). */
+  private past: HandSample[] = [];
 
-  private low = Infinity;
+  private low = -Infinity;
 
-  private top = -Infinity;
+  private top = Infinity;
+
+  private restFor = 0;
 
   private lastHit = -Infinity;
 
-  /** Forget the stick (it left the camera). */
+  /** Forget the hand (it left the camera). */
   reset() {
-    this.prev = null;
-    this.prevDown = 0;
+    this.past.length = 0;
     this.speed = 0;
+    this.down = 0;
     this.armed = true;
-    this.low = Infinity;
-    this.top = -Infinity;
+    this.low = -Infinity;
+    this.top = Infinity;
+    this.restFor = 0;
   }
 
-  /**
-   * A fresh reading; returns the hit it makes, if any. `target` is the heads
-   * on screen, or a function that names the piece the stick is aimed at.
-   */
-  push(
-    s: StickSample,
-    target: readonly Zone[] | (() => PieceId | null),
-  ): StrokeHit | null {
-    const p = this.prev;
+  /** A fresh reading; returns the stroke it starts, if any. */
+  push(s: HandSample): StrokeHit | null {
+    const { past } = this;
+    const p = past[past.length - 1];
     if (p && s.t <= p.t) return null;
-    this.prev = s;
-    if (!p) return null;
-    const dt = s.t - p.t;
-    const palm = Math.max(1e-3, s.palm);
-    const dx = (s.x - p.x) / palm;
-    const dy = (s.y - p.y) / palm;
-    if (dt > STROKE.maxDt || Math.hypot(dx, dy) > STROKE.maxJump) {
-      this.prevDown = 0;
+    if (
+      p &&
+      (s.t - p.t > STROKE.maxDt ||
+        Math.hypot(s.x - p.x, s.y - p.y) >
+          Math.max(STROKE.maxJump, STROKE.maxSpeed * (s.t - p.t)))
+    ) {
+      // A gap or a jump: start again from here (after a long gap, ready).
+      past.length = 0;
+      this.top = s.y;
+      if (s.t - p.t >= STROKE.lostRearm) this.armed = true;
+      else this.low = Math.max(this.low, s.y);
+    }
+    past.push(s);
+    while (past.length > 8) past.shift();
+    if (past.length === 1) {
+      this.top = s.y;
       this.speed = 0;
+      this.down = 0;
       return null;
     }
-    const vx = dx / dt;
-    const vy = dy / dt;
-    this.speed = Math.hypot(vx, vy);
-    const down = -vy;
-    const before = this.prevDown;
-    this.prevDown = down;
+    // Speeds over a short window, so a repeated (or skipped) camera frame
+    // never makes a spike or a dip.
+    let ref = past[past.length - 2];
+    for (let i = past.length - 2; i >= 0; i -= 1) {
+      ref = past[i];
+      if (s.t - past[i].t >= STROKE.window) break;
+    }
+    const dt = s.t - ref.t;
+    const vx = (s.x - ref.x) / dt;
+    const down = (s.y - ref.y) / dt;
+    const step = s.t - p.t;
+    this.speed = Math.hypot(s.x - p.x, s.y - p.y) / step;
+    this.down = down;
 
     if (!this.armed) {
-      // Ready again only after a real lift.
-      this.low = Math.min(this.low, s.y);
-      const lifted = (s.y - this.low) / palm > STROKE.rearmRise;
-      if (lifted && s.t - this.lastHit >= STROKE.minGap) {
+      // Ready again after a real lift, or once it stops coming down.
+      this.low = Math.max(this.low, s.y);
+      this.restFor = down < STROKE.restSpeed ? this.restFor + step : 0;
+      const lifted = this.low - s.y > STROKE.rearmRise;
+      const over =
+        s.t - this.lastHit >= STROKE.rearmAfter &&
+        down < STROKE.startSpeed * 0.5;
+      if (
+        (lifted || over || this.restFor >= STROKE.rearmRest) &&
+        s.t - this.lastHit >= STROKE.minGap
+      ) {
         this.armed = true;
         this.top = s.y;
       }
       return null;
     }
 
-    // The hand's recent top (fading, so a slow drift never counts).
-    this.top = Math.max(s.y, this.top - STROKE.topFade * palm * dt);
-    // A stroke: moving down fast for two readings in a row, and come down a
-    // real distance; tracker jitter and small gestures don't play.
+    // The hand's recent top (fading down, so a slow drift never counts).
+    this.top = Math.min(s.y, this.top + STROKE.topFade * step);
     const stroke =
       down > STROKE.startSpeed &&
-      before > STROKE.startSpeed * 0.5 &&
-      (this.top - s.y) / palm >= STROKE.minTravel;
+      down >= STROKE.downRatio * Math.abs(vx) &&
+      s.y - this.top >= STROKE.minTravel;
     if (!stroke || s.t - this.lastHit < STROKE.minGap) return null;
-
-    let piece: PieceId | null;
-    if (typeof target === "function") piece = target();
-    else {
-      const ahead = STROKE.lead * palm;
-      piece =
-        firstZoneOnPath(target, [
-          p.x,
-          p.y,
-          s.x,
-          s.y,
-          s.x + vx * ahead,
-          s.y + vy * ahead,
-        ])?.id ?? null;
-    }
-    if (!piece) return null;
     this.armed = false;
     this.low = s.y;
+    this.restFor = 0;
     this.lastHit = s.t;
-    return {
-      piece,
-      velocity: strokeVelocity(down),
-      speed: down,
-      t: s.t,
-    };
+    return { velocity: strokeVelocity(down), speed: down, side: vx, t: s.t };
   }
 }

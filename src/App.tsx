@@ -18,6 +18,7 @@ import { PerspectiveCamera } from "@react-three/drei";
 import { Scene } from "./Scene";
 import { Home } from "./drums/Home";
 import { drums, useDrumsVersion } from "./drums/state";
+import { CAMERA_PERF } from "./drums/tracking";
 import { PreviewAnchors } from "./PreviewAnchors";
 import {
   announcedPresets,
@@ -377,7 +378,7 @@ export const Shell = () => {
 };
 
 const App = () => (
-  <XRProvider>
+  <XRProvider perf={CAMERA_PERF}>
     <Shell />
   </XRProvider>
 );
