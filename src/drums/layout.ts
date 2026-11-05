@@ -118,7 +118,8 @@ export const FRAME_RADIUS = 16;
 export const frameRect = (width: number, height: number) => {
   // Portrait-ish on a phone, landscape-ish on a laptop, never extreme.
   const aspect = Math.min(1.33, Math.max(0.75, width / Math.max(1, height)));
-  const h = Math.min(220, Math.max(110, height * 0.24));
+  // Big enough to read the pieces' map on it.
+  const h = Math.min(300, Math.max(130, height * 0.3));
   const w = Math.round(h * aspect);
   return {
     left: width - GUTTER - w,

@@ -4,15 +4,28 @@
 // edge and a soft shadow. Picture, edge and shadow are one quad drawn from
 // one rect (layout.ts), so they can never drift apart at any size.
 //
-// Over the picture: each tracked hand's points and bones. Tap it to tuck it
+// Over the picture: where each piece is played from (the same map the
+// sticks use, over your learnt reach: the hi-hat and the crash up high on
+// each side, the rack tom between, the snare and the floor tom low), named,
+// the one under each hand lit and the one just hit flashing; and each
+// tracked hand's points and bones. Tap it to tuck it
 // away (it shrinks into the corner, leaving a small camera button); tap
 // that to bring it back. It is hidden while there is no camera picture.
 import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
-import { ShaderMaterial, SRGBColorSpace, Vector2, type Mesh } from "three";
+import {
+  CanvasTexture,
+  ShaderMaterial,
+  SRGBColorSpace,
+  Vector2,
+  Vector3,
+  Vector4,
+  type Mesh,
+} from "three";
 import { useXRCameraTexture } from "@vincentt-xr/sdk/low-level";
 
-import { ghosts } from "./GhostHands";
+import { AIM, SPOTS } from "./aim";
+import { ghosts, reachBox } from "./GhostHands";
 import { FRAME_RADIUS, frameRect } from "./layout";
 import { drums } from "./state";
 
@@ -20,6 +33,46 @@ import { drums } from "./state";
 const MARGIN = 28;
 /** Tuck away / bring back (s). */
 const TUCK = 0.35;
+/** Each piece's name on the camera, in SPOTS order. */
+const NAMES: Record<string, string> = {
+  hihat: "Hi-hat",
+  tom1: "Tom",
+  crash: "Crash",
+  snare: "Snare",
+  tom2: "Floor tom",
+};
+/** A name's size on the camera (CSS px). */
+const LABEL = { w: 66, h: 15 };
+/** A hit's flash fades over this long (s). */
+const FLASH = 0.35;
+
+/** The pieces' names, one row each, for the shader. */
+const labelAtlas = () => {
+  const c = document.createElement("canvas");
+  const rowH = 48;
+  c.width = 220;
+  c.height = rowH * SPOTS.length;
+  const g = c.getContext("2d");
+  if (g) {
+    g.font = "600 30px system-ui, -apple-system, sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    SPOTS.forEach((sp, i) => {
+      // A dark pill behind each name, so it reads on any picture.
+      const text = NAMES[sp.id];
+      const tw = Math.min(c.width - 4, g.measureText(text).width + 28);
+      const y = rowH * i + 4;
+      const ph = rowH - 8;
+      g.fillStyle = "rgba(10,14,20,0.62)";
+      g.beginPath();
+      g.roundRect((c.width - tw) / 2, y, tw, ph, ph / 2);
+      g.fill();
+      g.fillStyle = "#ffffff";
+      g.fillText(text, c.width / 2, rowH * (i + 0.5));
+    });
+  }
+  return new CanvasTexture(c);
+};
 
 const vert = /* glsl */ `
   uniform vec4 rect;   // panel: left, top, width, height (CSS px)
@@ -45,6 +98,16 @@ const frag = /* glsl */ `
   uniform vec2 shown;      // each hand shown, 0..1
   uniform vec2 handL[21];  // each hand's points on the picture (u, v down)
   uniform vec2 handR[21];
+  uniform float guides;      // the pieces' map shown, 0..1
+  uniform vec4 reach;        // your reach on the picture: u0, u1, v0, v1
+  uniform vec3 spots[5];     // each piece on the kit: x, y, radius (SPOTS order)
+  uniform vec4 cym;          // the cymbals' reach: high, side, wide, wide high
+  uniform float over;        // how far past the reach the kit goes
+  uniform float lit[5];      // each piece under a hand, 0..1
+  uniform float flash[5];    // each piece just hit, 0..1
+  uniform vec2 labelAt[5];   // each name's place on the picture (u, v down)
+  uniform vec2 labelSize;    // CSS px
+  uniform sampler2D labels;
   varying vec2 vPx;
 
   // The hand's bones: pairs of point indexes.
@@ -93,6 +156,26 @@ const frag = /* glsl */ `
     return vec2(0.5 + (c.x - 0.5) * screenAspect / pa, c.y);
   }
 
+  // The piece played from a place on the kit (as aim.ts: a cymbal up high
+  // on its side, else the nearest piece in its radii).
+  int pieceAt(vec2 k) {
+    bool high = k.y < cym.x;
+    if (k.x < cym.y && (high || (-k.x > cym.z && k.y < cym.w))) return 0;
+    if (k.x > 1.0 - cym.y && (high || (k.x - 1.0 > cym.z && k.y < cym.w))) return 2;
+    int best = 0;
+    float bd = 1e9;
+    for (int i = 0; i < 5; i++) {
+      float dd = length(k - spots[i].xy) / spots[i].z;
+      if (dd < bd) { bd = dd; best = i; }
+    }
+    return best;
+  }
+  float pick(float a[5], int id) {
+    float v = 0.0;
+    for (int i = 0; i < 5; i++) if (i == id) v = a[i];
+    return v;
+  }
+
   void main() {
     vec2 size = rect.zw;
     vec2 hs = size * 0.5;
@@ -113,6 +196,32 @@ const frag = /* glsl */ `
     vec2 uv = vec2(vPx.x / size.x, 1.0 - vPx.y / size.y);
     vec3 c = texture2D(cam, toCam(uv, pa)).rgb;
     if (camLinear > 0.5) c = toSrgb(c);
+
+    // Where each piece is played from: faint areas, the one under a hand
+    // lit, the one just hit flashing, thin borders, and their names.
+    if (guides > 0.01) {
+      vec2 cuv = toCam(uv, pa);
+      vec2 pic = vec2(cuv.x, 1.0 - cuv.y);
+      vec2 k = clamp(
+        (pic - reach.xz) / max(reach.yw - reach.xz, vec2(1e-4)),
+        vec2(-over), vec2(1.0 + over));
+      int id = pieceAt(k);
+      float idf = float(id);
+      float border = step(0.001, abs(dFdx(idf)) + abs(dFdy(idf)));
+      bool cymbal = id == 0 || id == 2;
+      vec3 tint = cymbal ? vec3(1.0, 0.82, 0.45) : vec3(0.78, 0.9, 1.0);
+      float a = 0.05 + 0.2 * pick(lit, id) + 0.4 * pick(flash, id);
+      c = mix(c, tint, a * guides);
+      c = mix(c, vec3(1.0), border * 0.3 * guides);
+      for (int i = 0; i < 5; i++) {
+        vec2 lp = toPanel(vec2(labelAt[i].x, 1.0 - labelAt[i].y), pa);
+        vec2 q = (vPx - vec2(lp.x, 1.0 - lp.y) * size) / labelSize + 0.5;
+        if (q.x > 0.0 && q.x < 1.0 && q.y > 0.0 && q.y < 1.0) {
+          vec4 t = texture2D(labels, vec2(q.x, 1.0 - (float(i) + q.y) / 5.0));
+          c = mix(c, t.rgb, t.a * guides * 0.95);
+        }
+      }
+    }
 
     // Each tracked hand: its bones and points.
     for (int k = 0; k < 2; k++) {
@@ -172,6 +281,23 @@ export const CameraFrame = () => {
           shown: { value: [0, 0] },
           handL: { value: Array.from({ length: 21 }, () => new Vector2()) },
           handR: { value: Array.from({ length: 21 }, () => new Vector2()) },
+          guides: { value: 0 },
+          reach: { value: new Vector4(0.2, 0.8, 0.3, 0.75) },
+          spots: { value: SPOTS.map((sp) => new Vector3(sp.x, sp.y, sp.r)) },
+          cym: {
+            value: new Vector4(
+              AIM.cymbalHigh,
+              AIM.cymbalSide,
+              AIM.cymbalWide,
+              AIM.cymbalWideHigh,
+            ),
+          },
+          over: { value: AIM.over },
+          lit: { value: [0, 0, 0, 0, 0] },
+          flash: { value: [0, 0, 0, 0, 0] },
+          labelAt: { value: SPOTS.map(() => new Vector2()) },
+          labelSize: { value: new Vector2(LABEL.w, LABEL.h) },
+          labels: { value: labelAtlas() },
         },
         vertexShader: vert,
         fragmentShader: frag,
@@ -215,6 +341,34 @@ export const CameraFrame = () => {
       const pts = u[side === "left" ? "handL" : "handR"].value as Vector2[];
       pts.forEach((p, i) => p.set(g.points[i * 2], g.points[i * 2 + 1]));
     });
+    // The pieces' map: over your reach, each named at its middle, lit under
+    // a hand and flashing when hit.
+    const b = reachBox;
+    (u.reach.value as Vector4).set(b.u0, b.u1, b.v0, b.v1);
+    const nowMs = performance.now();
+    const lit = u.lit.value as number[];
+    const flash = u.flash.value as number[];
+    SPOTS.forEach((sp, i) => {
+      lit[i] = 0;
+      flash[i] = 0;
+      (["left", "right"] as const).forEach((side) => {
+        const g = ghosts[side];
+        if (g.tracked && g.piece === sp.id) lit[i] = Math.max(lit[i], g.shown);
+        const e = (nowMs - g.hitAt) / 1000;
+        if (g.hitPiece === sp.id && e < FLASH)
+          flash[i] = Math.max(flash[i], 1 - e / FLASH);
+      });
+      // The name sits on the piece's spot, kept inside the picture.
+      const lu = b.u0 + sp.x * (b.u1 - b.u0);
+      const lv = b.v0 + Math.max(0.04, sp.y) * (b.v1 - b.v0);
+      (u.labelAt.value as Vector2[])[i].set(
+        Math.min(0.92, Math.max(0.08, lu)),
+        Math.min(0.94, Math.max(0.05, lv)),
+      );
+    });
+    // The map shows while hands play.
+    const on = drums.handsOn && drums.started ? 1 : 0;
+    u.guides.value += (on - u.guides.value) * 0.1;
   });
 
   return (

@@ -27,6 +27,7 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  RingGeometry,
   Vector3,
   type Object3D,
 } from "three";
@@ -272,6 +273,16 @@ const TRAIL = {
   full: 3,
 };
 
+/** The landing dot: its ring (m), colours and hit pulse (s). */
+const DOT = {
+  inner: 0.028,
+  outer: 0.04,
+  color: "#dff0ff",
+  hit: "#ffd27a",
+  pulse: 0.3,
+};
+const Z_AXIS = new Vector3(0, 0, 1);
+
 /** A lifted hand (box heights) lifts the stick this much (m), at most `LIFT_MAX`. */
 const LIFT = 0.35;
 const LIFT_MAX = 0.28;
@@ -496,6 +507,27 @@ export const GhostHands = () => {
   const fakeStamp = useRef<Partial<Record<Side, number>>>({}).current;
   // The stick's motion trail: faint copies at its last few places, shown
   // only while it moves fast (a stroke).
+  // Where each stick lands if it strikes now: a small ring on the kit,
+  // that pulses on a hit.
+  const dots = useMemo(() => {
+    const geo = new RingGeometry(DOT.inner, DOT.outer, 40);
+    const make = () => {
+      const m = new Mesh(
+        geo,
+        new MeshBasicMaterial({
+          color: DOT.color,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+          toneMapped: false,
+        }),
+      );
+      m.renderOrder = 10;
+      m.visible = false;
+      return m;
+    };
+    return { left: make(), right: make() };
+  }, []);
   const trails = useMemo(() => {
     const make = (g: Ghost) => {
       const stick = g.root.getObjectByName("Drumstick") as Mesh | undefined;
@@ -778,6 +810,28 @@ export const GhostHands = () => {
         });
       }
 
+      // The landing dot: on the kit under the stick, pulsing on a hit.
+      const dot = dots[side];
+      const dm = dot.material as MeshBasicMaterial;
+      const show = st.tracked ? st.shown : 0;
+      dot.visible = show > 0.02 && drums.handsOn;
+      if (dot.visible) {
+        dot.position.copy(st.point).addScaledVector(st.normal, 0.006);
+        dot.quaternion.setFromUnitVectors(Z_AXIS, st.normal);
+        const hitE = (nowMs - st.hitAt) / 1000;
+        const pulse = hitE < DOT.pulse ? 1 - hitE / DOT.pulse : 0;
+        dot.scale.setScalar(1 + 0.8 * pulse);
+        // Faint between pieces: it is where the stick lands, on a piece.
+        const ph = st.piece ? headOf(st.piece) : null;
+        const off = ph
+          ? Math.hypot(st.point.x - ph.center.x, st.point.z - ph.center.z) /
+            ph.radius
+          : 2;
+        const onPiece = Math.min(1, Math.max(0.15, 1.8 - off));
+        dm.opacity = show * Math.max(onPiece * 0.6, pulse);
+        dm.color.set(pulse > 0 ? DOT.hit : DOT.color);
+      }
+
       // For the hi-hat: the tip's place (across the kit, and its height).
       const hatHead = headOf("hihat");
       st.hat.present = st.tracked && !!hatHead;
@@ -815,6 +869,8 @@ export const GhostHands = () => {
       ) : null}
       <primitive object={models.left.root} />
       <primitive object={models.right.root} />
+      <primitive object={dots.left} />
+      <primitive object={dots.right} />
       {[...trails.left.copies, ...trails.right.copies].map((m) => (
         <primitive key={m.uuid} object={m} />
       ))}
