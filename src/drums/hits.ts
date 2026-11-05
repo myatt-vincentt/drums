@@ -39,7 +39,7 @@ export const zoneDistance = (z: Zone, px: number, py: number) => {
 
 export const STROKE = {
   /** A stroke comes down at least this fast (box heights/s)… */
-  startSpeed: 1.4,
+  startSpeed: 1.1,
   /** …at least this far from its recent top… */
   minTravel: 0.1,
   /** …and lands once it slows to this share of its fastest. */
@@ -56,7 +56,7 @@ export const STROKE = {
   /** Downward speed that plays at full loudness. */
   loudSpeed: 5,
   /** A lift this far above the lowest point re-arms the hand… */
-  rearmRise: 0.06,
+  rearmRise: 0.03,
   /** …or no longer coming down (slower than `restSpeed`) for this long (s)… */
   rearmRest: 0.15,
   restSpeed: 0.3,

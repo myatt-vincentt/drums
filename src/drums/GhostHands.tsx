@@ -90,8 +90,9 @@ const WIND = 0.45;
 const DRAW_FOLLOW = 22;
 /** A hand not seen for this long (ms) is gone. */
 const LOST_MS = 600;
-/** The hand's place on the picture: the wrist and the four knuckles. */
-const PALM = [0, 5, 9, 13, 17];
+/** The hand's place on the picture: the fist (the knuckles and the middle
+ * finger joints). A drumming flick moves the fist far more than the wrist. */
+const PALM = [5, 6, 9, 10, 13, 14, 17, 18];
 
 const SIDES: Side[] = ["left", "right"];
 
