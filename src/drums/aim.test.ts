@@ -1,35 +1,37 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  AIM,
+  cymbalAt,
   HandAim,
-  LAYOUT,
-  nextAim,
+  landedOn,
+  pieceAt,
   ReachBox,
   REACH,
-  regionAt,
   type Box,
 } from "./aim";
 
 const BOX: Box = { u0: 0, u1: 1, v0: 0, v1: 1 };
 
-describe("regions", () => {
-  it("lays the kit out like you see it", () => {
-    expect(regionAt(0.2, 0.2)).toBe("hihat");
-    expect(regionAt(0.8, 0.2)).toBe("crash");
-    expect(regionAt(0.1, 0.8)).toBe("snare");
-    expect(regionAt(0.5, 0.8)).toBe("tom1");
-    expect(regionAt(0.9, 0.8)).toBe("tom2");
+describe("the kit from the seat", () => {
+  it("lays the pieces out as you see them", () => {
+    expect(pieceAt(0, 0.15)).toBe("hihat");
+    expect(pieceAt(0.4, 0.15)).toBe("tom1");
+    expect(pieceAt(0.9, 0.05)).toBe("crash");
+    expect(pieceAt(0.15, 0.95)).toBe("snare");
+    expect(pieceAt(0.95, 0.95)).toBe("tom2");
   });
 
-  it("changes piece only clearly past a border", () => {
-    const m = LAYOUT.margin;
-    // On the snare, wavering just past the line to the tom: still the snare.
-    expect(nextAim("snare", LAYOUT.drums[0] + m * 0.5, 0.8)).toBe("snare");
-    expect(nextAim("snare", LAYOUT.drums[0] + m * 1.5, 0.8)).toBe("tom1");
-    // Up from the snare a little: still the snare; well up: the hi-hat.
-    expect(nextAim("snare", 0.2, LAYOUT.row - m * 0.5)).toBe("snare");
-    expect(nextAim("snare", 0.2, LAYOUT.row - m * 1.5)).toBe("hihat");
-    expect(nextAim(null, 0.2, 0.2)).toBe("hihat");
+  it("plays a stroke where it lands", () => {
+    expect(landedOn(0.15, 0.95, BOX).piece).toBe("snare");
+    expect(landedOn(0.95, 0.95, BOX).piece).toBe("tom2");
+  });
+
+  it("meets a cymbal only from up high on its side", () => {
+    expect(cymbalAt(0.1, 0)).toBe("hihat");
+    expect(cymbalAt(0.9, 0)).toBe("crash");
+    expect(cymbalAt(0.5, 0)).toBeNull();
+    expect(cymbalAt(0.1, AIM.cymbalHigh + 0.1)).toBeNull();
   });
 });
 
@@ -58,31 +60,32 @@ describe("reach", () => {
 });
 
 describe("hand aim", () => {
-  it("follows the hand and names the piece under it", () => {
+  it("follows the hand across the kit", () => {
     const a = new HandAim();
-    for (let i = 0; i < 10; i += 1) a.update(1 / 30, 0.85, 0.2, BOX);
-    expect(a.piece).toBe("crash");
-    // A slow move down (not a stroke) takes the aim with it.
-    for (let i = 1; i <= 40; i += 1)
-      a.update(1 / 30, 0.85, 0.2 + i * 0.0175, BOX);
+    a.update(1 / 30, 0.15, 0.95, BOX);
+    expect(a.piece).toBe("snare");
+    for (let i = 0; i < 30; i += 1)
+      a.update(1 / 30, 0.15 + i * 0.03, 0.95, BOX);
     expect(a.piece).toBe("tom2");
+    expect(a.x).toBeGreaterThan(0.9);
   });
 
-  it("follows again after a quick move down that stays down", () => {
+  it("lifts the stick when the hand lifts, and moves out when it stays up", () => {
     const a = new HandAim();
-    for (let i = 0; i < 10; i += 1) a.update(1 / 30, 0.85, 0.2, BOX);
-    for (let i = 0; i < 20; i += 1) a.update(1 / 30, 0.85, 0.85, BOX);
-    expect(a.piece).toBe("tom2");
-  });
-
-  it("holds through a quick stroke down from a cymbal", () => {
-    const a = new HandAim();
-    for (let i = 0; i < 10; i += 1) a.update(1 / 30, 0.2, 0.35, BOX);
+    a.update(1 / 30, 0.15, 0.95, BOX);
+    a.update(1 / 30, 0.15, 0.6, BOX);
+    expect(a.lift).toBeGreaterThan(0.25);
+    expect(a.piece).toBe("snare");
+    for (let i = 0; i < 60; i += 1) a.update(1 / 30, 0.0, 0.3, BOX);
+    expect(a.lift).toBeLessThan(0.05);
     expect(a.piece).toBe("hihat");
-    // Down fast, well into the snare's region, and back up.
-    [0.45, 0.6, 0.72, 0.75, 0.6, 0.45, 0.35].forEach((v) => {
-      a.update(1 / 30, 0.2, v, BOX);
-      expect(a.piece).toBe("hihat");
-    });
+  });
+
+  it("sets its level where a stroke lands", () => {
+    const a = new HandAim();
+    a.update(1 / 30, 0.95, 0.4, BOX);
+    a.land(0.95, 0.95, BOX);
+    expect(a.lift).toBe(0);
+    expect(a.piece).toBe("tom2");
   });
 });

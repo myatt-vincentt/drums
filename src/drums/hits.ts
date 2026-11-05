@@ -1,12 +1,14 @@
 // Stick strokes, from your hand's motion on the camera picture.
 //
-// A stroke is a quick move of the hand down. It plays at its START: as soon
-// as the hand is clearly moving down fast, after coming down a little way.
-// That hides the camera and tracking delay, so the sound lands about when
-// the stick would meet the head. How fast the stroke is sets how loud it
-// plays. A hand plays once per stroke and is ready again once it lifts (or
-// rests a moment). Slow drifts, small wobbles and the jumps of a lost hand
-// never play.
+// A stroke is a quick move of the hand down that stops: it plays where it
+// lands (the stick meets the head there), as soon as the hand slows at the
+// bottom. How fast it came down sets how loud it plays. A hand plays once
+// per stroke and is ready again once it lifts (or rests a moment). Slow
+// drifts, small wobbles and the jumps of a lost hand never play.
+//
+// Fast hands blur, and the tracker often loses a hand for a few frames in
+// the middle of a stroke. A hand that was coming down fast (or that comes
+// back clearly lower) within a moment landed: it plays where it comes back.
 //
 // Units: the reach box (aim.ts): x across and y DOWN, 1 = the box's height
 // (strokeUnit), so a small reach plays the same as a big one; a box not yet
@@ -36,10 +38,15 @@ export const zoneDistance = (z: Zone, px: number, py: number) => {
 };
 
 export const STROKE = {
-  /** Downward speed (box heights/s) that starts a stroke… */
+  /** A stroke comes down at least this fast (box heights/s)… */
   startSpeed: 1.4,
-  /** …after the hand has come down at least this far from its recent top. */
+  /** …at least this far from its recent top… */
   minTravel: 0.1,
+  /** …and lands once it slows to this share of its fastest. */
+  landShare: 0.5,
+  /** A hand lost on its way down (or out of sight and back clearly lower,
+   * coming down at least `startSpeed` on average) within this long (s) landed. */
+  blurGap: 0.35,
   /** …moving more down than sideways (down ÷ sideways at least this). */
   downRatio: 0.4,
   /** The top fades this fast (box heights/s), so a slow drift never adds up. */
@@ -83,11 +90,14 @@ export type HandSample = { t: number; x: number; y: number };
 export type StrokeHit = {
   /** Loudness 0..1. */
   velocity: number;
-  /** The stroke's downward speed (box heights/s). */
+  /** The stroke's fastest downward speed (box heights/s). */
   speed: number;
-  /** Its sideways speed (box heights/s). */
+  /** Its sideways speed then (box heights/s). */
   side: number;
   t: number;
+  /** Where it landed (the reading's x, y). */
+  x: number;
+  y: number;
 };
 
 /** Loudness (0..1) of a stroke from its downward speed. */
@@ -98,7 +108,7 @@ export const strokeVelocity = (speed: number) => {
   return STROKE.softest + (1 - STROKE.softest) * k ** 0.85;
 };
 
-/** Watches one hand's readings and calls out its strokes. */
+/** Watches one hand's readings and calls out its strokes as they land. */
 export class StrokeDetector {
   /** Ready for a hit (it has lifted since the last one). */
   armed = true;
@@ -109,12 +119,26 @@ export class StrokeDetector {
   /** Its downward speed (box heights/s). */
   down = 0;
 
+  /** This reading began a stroke (it has come down fast far enough): a
+   * cymbal plays here, on the way down; a drum waits for it to land. */
+  started = false;
+
+  /** The highest reading before the stroke under way (its x, y). */
+  from = { x: 0, y: 0 };
+
   /** The last few readings (speeds are measured over `STROKE.window`). */
   private past: HandSample[] = [];
 
   private low = -Infinity;
 
   private top = Infinity;
+
+  /** The fastest downward speed of the move down under way (0: none). */
+  private peak = 0;
+
+  private peakSide = 0;
+
+  private begun = false;
 
   private restFor = 0;
 
@@ -128,25 +152,73 @@ export class StrokeDetector {
     this.armed = true;
     this.low = -Infinity;
     this.top = Infinity;
+    this.peak = 0;
+    this.begun = false;
+    this.started = false;
     this.restFor = 0;
   }
 
-  /** A fresh reading; returns the stroke it starts, if any. */
+  /** Not ready until the hand lifts or rests (it just played some other way). */
+  disarm(s: HandSample) {
+    this.armed = false;
+    this.begun = false;
+    this.low = s.y;
+    this.restFor = 0;
+    this.peak = 0;
+    this.lastHit = s.t;
+  }
+
+  private hit(s: HandSample, speed: number, side: number): StrokeHit {
+    this.disarm(s);
+    return {
+      velocity: strokeVelocity(speed),
+      speed,
+      side,
+      t: s.t,
+      x: s.x,
+      y: s.y,
+    };
+  }
+
+  /** A fresh reading; returns the stroke that lands with it, if any. */
   push(s: HandSample): StrokeHit | null {
     const { past } = this;
     const p = past[past.length - 1];
+    this.started = false;
     if (p && s.t <= p.t) return null;
+    const gap = p ? s.t - p.t : 0;
     if (
       p &&
-      (s.t - p.t > STROKE.maxDt ||
+      (gap > STROKE.maxDt ||
         Math.hypot(s.x - p.x, s.y - p.y) >
-          Math.max(STROKE.maxJump, STROKE.maxSpeed * (s.t - p.t)))
+          Math.max(STROKE.maxJump, STROKE.maxSpeed * gap))
     ) {
-      // A gap or a jump: start again from here (after a long gap, ready).
+      // A gap (or a jump): a hand lost on its way down, or back clearly
+      // lower, landed; otherwise start again from here.
+      const fell = s.y - p.y;
+      const top = Math.min(this.top, p.y);
+      let out: StrokeHit | null = null;
+      if (
+        this.armed &&
+        gap > STROKE.maxDt &&
+        gap <= STROKE.blurGap &&
+        s.t - this.lastHit >= STROKE.minGap &&
+        s.y - top >= STROKE.minTravel &&
+        ((this.peak >= STROKE.startSpeed && fell > -0.02) ||
+          (fell >= STROKE.minTravel && fell / gap >= STROKE.startSpeed))
+      )
+        out = this.hit(s, Math.max(this.peak, fell / gap), this.peakSide);
       past.length = 0;
+      past.push(s);
       this.top = s.y;
-      if (s.t - p.t >= STROKE.lostRearm) this.armed = true;
+      this.speed = 0;
+      this.down = 0;
+      this.peak = 0;
+      this.begun = false;
+      if (out) return out;
+      if (gap >= STROKE.lostRearm) this.armed = true;
       else this.low = Math.max(this.low, s.y);
+      return null;
     }
     past.push(s);
     while (past.length > 8) past.shift();
@@ -184,21 +256,40 @@ export class StrokeDetector {
       ) {
         this.armed = true;
         this.top = s.y;
+        this.peak = 0;
       }
       return null;
     }
 
     // The hand's recent top (fading down, so a slow drift never counts).
-    this.top = Math.min(s.y, this.top + STROKE.topFade * step);
-    const stroke =
-      down > STROKE.startSpeed &&
-      down >= STROKE.downRatio * Math.abs(vx) &&
-      s.y - this.top >= STROKE.minTravel;
-    if (!stroke || s.t - this.lastHit < STROKE.minGap) return null;
-    this.armed = false;
-    this.low = s.y;
-    this.restFor = 0;
-    this.lastHit = s.t;
-    return { velocity: strokeVelocity(down), speed: down, side: vx, t: s.t };
+    // While it comes down fast the top holds: the stroke's travel counts
+    // from where it began.
+    if (this.peak === 0) {
+      const fade = this.top + STROKE.topFade * step;
+      if (s.y <= fade) this.from = { x: s.x, y: s.y };
+      this.top = Math.min(s.y, fade);
+    } else if (s.y < this.top) {
+      this.top = s.y;
+      this.from = { x: s.x, y: s.y };
+    }
+    const fast =
+      down > STROKE.startSpeed && down >= STROKE.downRatio * Math.abs(vx);
+    if (fast && down > this.peak) {
+      this.peak = down;
+      this.peakSide = vx;
+    }
+    if (this.peak === 0) return null;
+    if (!this.begun && s.y - this.top >= STROKE.minTravel && fast) {
+      this.begun = true;
+      this.started = true;
+    }
+    // Coming down: it lands once it slows (or turns back up).
+    if (down > this.peak * STROKE.landShare) return null;
+    const { peak } = this;
+    this.peak = 0;
+    this.begun = false;
+    if (s.y - this.top < STROKE.minTravel || s.t - this.lastHit < STROKE.minGap)
+      return null;
+    return this.hit(s, peak, this.peakSide);
   }
 }

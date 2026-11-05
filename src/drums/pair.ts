@@ -17,6 +17,12 @@ export const PAIR = {
    * size) are one hand found twice: one is dropped. */
   same: 0.12,
   sameSize: 0.6,
+  /** A hand moves at most this far (picture widths) in a moment, plus this
+   * far a second. */
+  nearBase: 0.08,
+  nearSpeed: 2.5,
+  /** A lone reading this far (picture widths) past the other hand is that hand. */
+  order: 0.05,
 };
 
 type Slot = { u: number; v: number; t: number };
@@ -83,11 +89,30 @@ export class HandPairer {
       out.right = 1 - out.left;
     } else if (readings.length === 1) {
       let s: Side;
-      if (liveL && liveR) s = d("left", 0) <= d("right", 0) ? "left" : "right";
-      else if (liveL || liveR) {
+      if (liveL && liveR) {
+        s = d("left", 0) <= d("right", 0) ? "left" : "right";
+        // Hands seldom cross: a lone reading well past the other hand is it.
+        const r = readings[0];
+        if (s === "left" && r.u > this.slots.right!.u + PAIR.order) s = "right";
+        else if (s === "right" && r.u < this.slots.left!.u - PAIR.order)
+          s = "left";
+      } else if (liveL || liveR) {
+        // The hand still in view, if the reading is near enough (as far as
+        // a hand moves in the time since) and on its side.
         const known: Side = liveL ? "left" : "right";
         const other: Side = liveL ? "right" : "left";
-        s = d(known, 0) <= PAIR.near ? known : other;
+        const k = this.slots[known]!;
+        const r = readings[0];
+        const reach = Math.min(
+          PAIR.near,
+          PAIR.nearBase + PAIR.nearSpeed * (t - k.t),
+        );
+        const past =
+          known === "left" ? r.u > k.u + PAIR.order : r.u < k.u - PAIR.order;
+        s =
+          d(known, 0) <= reach && !(past && d(known, 0) > PAIR.nearBase)
+            ? known
+            : other;
       } else s = this.comeBack(t, readings[0]);
       out[s] = 0;
     }
@@ -103,6 +128,11 @@ export class HandPairer {
         if (out[s] === 0) out[s] = 1;
       });
     return out;
+  }
+
+  /** Hand `s` was found at (u, v) some other way (followed on the picture). */
+  note(s: Side, u: number, v: number, t: number) {
+    this.slots[s] = { u, v, t };
   }
 
   /** A hand appears with no hand in view: the one that was there lately, or by side. */

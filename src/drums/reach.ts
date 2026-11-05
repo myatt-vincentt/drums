@@ -1,5 +1,5 @@
 // Your reach on the camera picture: a box learnt from where your hands go.
-// The kit's regions (aim.ts) are laid over it, so a small or a big reach
+// The kit (aim.ts) is laid over it, so a small or a big reach
 // plays the whole kit. It grows to the hands' eased places (a stray reading
 // never stretches it), keeps clear of the picture's edges (a hand cut off by
 // an edge reads short), and edges the hands stop reaching creep back in,
@@ -101,8 +101,8 @@ export class ReachBox implements Box {
   }
 }
 
-/** A point of the picture → the box (0..1 across and down, clamped). */
-export const inBox = (b: Box, u: number, v: number) => ({
-  x: clamp((u - b.u0) / Math.max(1e-6, b.u1 - b.u0), 0, 1),
-  y: clamp((v - b.v0) / Math.max(1e-6, b.v1 - b.v0), 0, 1),
+/** A point of the picture → the box (0..1 across and down, clamped to `over` past it). */
+export const inBox = (b: Box, u: number, v: number, over = 0) => ({
+  x: clamp((u - b.u0) / Math.max(1e-6, b.u1 - b.u0), -over, 1 + over),
+  y: clamp((v - b.v0) / Math.max(1e-6, b.v1 - b.v0), -over, 1 + over),
 });

@@ -38,83 +38,73 @@ describe("zones", () => {
   });
 });
 
+/** Down at `speed` for `frames`, then still for a few frames: the stroke lands. */
+const stroke = (
+  det: StrokeDetector,
+  from: { t: number; y: number },
+  speed: number,
+  frames: number,
+) => {
+  const down = run(det, from, speed, frames);
+  const still = run(det, { t: down.t, y: down.y }, 0, 4);
+  return { hits: [...down.hits, ...still.hits], t: still.t, y: still.y };
+};
+
 describe("strokes", () => {
-  it("plays once, early in a quick move down", () => {
-    const det = new StrokeDetector();
-    run(det, { t: 0, y: 0.3 }, 0, 5);
-    const { hits } = run(det, { t: 5 / FPS, y: 0.3 }, 3, 8);
-    expect(hits).toHaveLength(1);
-    // Within the first few readings of the stroke.
-    expect(hits[0].t - 5 / FPS).toBeLessThan(0.15);
-  });
-
-  it("also plays at a low reading rate (15 a second)", () => {
-    const det = new StrokeDetector();
-    run(det, { t: 0, y: 0.3 }, 0, 4, 15);
-    expect(run(det, { t: 4 / 15, y: 0.3 }, 3, 5, 15).hits).toHaveLength(1);
-  });
-
-  it("ignores slow drifts, jitter and small dips", () => {
-    expect(
-      run(new StrokeDetector(), { t: 0, y: 0.2 }, 0.8, 40).hits,
-    ).toHaveLength(0);
-    const jitter = new StrokeDetector();
-    let n = 0;
-    for (let i = 0; i < 90; i += 1)
-      if (jitter.push({ t: i / FPS, x: 0, y: 0.5 + (i % 2 ? 0.02 : -0.02) }))
-        n += 1;
-    expect(n).toBe(0);
-    // A quick dip of 0.06 box heights, many times.
-    const dips = new StrokeDetector();
-    n = 0;
-    let t = 0;
-    for (let k = 0; k < 10; k += 1)
-      [0, 0.03, 0.06, 0.03, 0].forEach((dy) => {
-        if (dips.push({ t, x: 0, y: 0.5 + dy })) n += 1;
-        t += 1 / FPS;
-      });
-    expect(n).toBe(0);
-  });
-
-  it("ignores tracking jumps", () => {
-    const det = new StrokeDetector();
-    det.push({ t: 0, x: 0, y: 0.1 });
-    det.push({ t: 1 / FPS, x: 0, y: 0.1 });
-    expect(det.push({ t: 2 / FPS, x: 0, y: 0.7 })).toBeNull();
-    expect(det.push({ t: 3 / FPS, x: 0, y: 0.72 })).toBeNull();
-  });
-
-  it("plays once per stroke, again after a lift", () => {
+  it("plays once, where a quick move down lands", () => {
     const det = new StrokeDetector();
     run(det, { t: 0, y: 0.2 }, 0, 4);
-    const first = run(det, { t: 4 / FPS, y: 0.2 }, 3, 6);
+    const s = stroke(det, { t: 4 / FPS, y: 0.2 }, 3, 6);
+    expect(s.hits).toHaveLength(1);
+    expect(s.hits[0].y).toBeGreaterThan(0.45);
+  });
+
+  it("ignores slow drifts and small wobbles", () => {
+    const det = new StrokeDetector();
+    expect(stroke(det, { t: 0, y: 0.2 }, 0.5, 30).hits).toHaveLength(0);
+    expect(stroke(det, { t: 2, y: 0.5 }, 3, 1).hits).toHaveLength(0);
+  });
+
+  it("plays again only after the hand lifts or rests", () => {
+    const det = new StrokeDetector();
+    run(det, { t: 0, y: 0.2 }, 0, 4);
+    const first = stroke(det, { t: 4 / FPS, y: 0.2 }, 3, 6);
     expect(first.hits).toHaveLength(1);
-    // Still coming down: no second hit.
-    const more = run(det, { t: first.t, y: first.y }, 3, 3);
-    expect(more.hits).toHaveLength(0);
-    // Back up, then down again.
-    const up = run(det, { t: more.t, y: more.y }, -3, 6);
-    expect(det.armed).toBe(true);
-    expect(run(det, { t: up.t, y: up.y }, 3, 6).hits).toHaveLength(1);
+    const up = run(det, { t: first.t, y: first.y }, -3, 6);
+    const second = stroke(det, { t: up.t, y: up.y }, 3, 6);
+    expect(second.hits).toHaveLength(1);
   });
 
-  it("is ready again after the hand rests low a moment", () => {
+  it("lands a stroke the tracker lost on its way down", () => {
     const det = new StrokeDetector();
     run(det, { t: 0, y: 0.2 }, 0, 4);
-    const first = run(det, { t: 4 / FPS, y: 0.2 }, 3, 6);
-    run(det, { t: first.t, y: first.y }, 0, 12);
-    expect(det.armed).toBe(true);
+    const d = run(det, { t: 4 / FPS, y: 0.2 }, 3, 3);
+    // Lost for 0.2 s, back lower.
+    const hit = det.push({ t: d.t + 0.2, x: 0, y: d.y + 0.25 });
+    expect(hit).not.toBeNull();
+  });
+
+  it("calls out where a stroke begins", () => {
+    const det = new StrokeDetector();
+    run(det, { t: 0, y: 0.2 }, 0, 4);
+    let began = 0;
+    let t = 4 / FPS;
+    for (let y = 0.2; y < 0.6; y += 0.1, t += 1 / FPS) {
+      det.push({ t, x: 0, y });
+      if (det.started) began += 1;
+    }
+    expect(began).toBe(1);
+    expect(det.from.y).toBeCloseTo(0.2, 1);
   });
 
   it("is louder for faster strokes", () => {
-    expect(strokeVelocity(STROKE.startSpeed)).toBeCloseTo(STROKE.softest);
-    expect(strokeVelocity(STROKE.loudSpeed)).toBeCloseTo(1);
     const soft = new StrokeDetector();
-    run(soft, { t: 0, y: 0.2 }, 0, 4);
     const hard = new StrokeDetector();
+    run(soft, { t: 0, y: 0.2 }, 0, 4);
     run(hard, { t: 0, y: 0.2 }, 0, 4);
-    const s = run(soft, { t: 4 / FPS, y: 0.2 }, 2, 8).hits[0];
-    const h = run(hard, { t: 4 / FPS, y: 0.2 }, 6, 8).hits[0];
+    const s = stroke(soft, { t: 4 / FPS, y: 0.2 }, 2, 6).hits[0];
+    const h = stroke(hard, { t: 4 / FPS, y: 0.2 }, 6, 3).hits[0];
     expect(s.velocity).toBeLessThan(h.velocity);
+    expect(strokeVelocity(STROKE.loudSpeed)).toBeCloseTo(1);
   });
 });
