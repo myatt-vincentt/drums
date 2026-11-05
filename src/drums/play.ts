@@ -203,9 +203,14 @@ export class Players {
     // In box heights, from the picture's corner: the box grows as it learns,
     // and a still hand must never seem to move.
     const sample = { t, x: r.u / unit, y: r.v / unit };
-    const play = (piece: StickPiece, velocity: number, how: PlayHit["how"]) => {
+    const play = (
+      piece: StickPiece,
+      velocity: number,
+      how: PlayHit["how"],
+      at = r,
+    ) => {
       const s = spot(piece);
-      const p = how === "land" ? inBox(b, r.u, r.v, AIM.over) : s;
+      const p = how === "land" ? inBox(b, at.u, at.v, AIM.over) : s;
       hits.push({
         side,
         piece,
@@ -246,24 +251,38 @@ export class Players {
       return;
     }
     const hit: StrokeHit | null = h.detector.push(sample);
-    if (hit) {
-      const l = landedOn(r.u, r.v, b, side);
-      h.aim.land(r.u, r.v, b);
-      play(l.piece, hit.velocity, "land");
-      return;
-    }
-    if (h.detector.started) {
-      // Began over a cymbal: it meets the cymbal on the way down.
-      const f = h.detector.from;
+    // A stroke that began up at a cymbal (held there a moment, not just
+    // passing) meets the cymbal on its way down.
+    const cymbalFrom = (f: { x: number; y: number }) => {
       const at = inBox(b, f.x * unit, f.y * unit, AIM.over);
       const c = cymbalAt(at.x, at.y);
       const held = h.high;
-      if (
-        c &&
+      return c &&
         held?.piece === c &&
         held.last - held.since >= AIM.cymbalDwell &&
         t - held.last < 0.35
-      ) {
+        ? c
+        : null;
+    };
+    if (hit) {
+      const c = cymbalFrom(hit.from);
+      if (c) {
+        h.aim.update(dt, r.u, r.v, b);
+        h.cymbalAt = t;
+        play(c, hit.velocity, "cymbal");
+        return;
+      }
+      // Where it landed: its lowest point.
+      const lu = hit.x * unit;
+      const lv = hit.y * unit;
+      const l = landedOn(lu, lv, b, side);
+      h.aim.land(lu, lv, b);
+      play(l.piece, hit.velocity, "land", { u: lu, v: lv });
+      return;
+    }
+    if (h.detector.started) {
+      const c = cymbalFrom(h.detector.from);
+      if (c) {
         h.detector.disarm(sample);
         h.aim.update(dt, r.u, r.v, b);
         h.cymbalAt = t;

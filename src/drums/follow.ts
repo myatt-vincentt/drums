@@ -28,6 +28,10 @@ export const FOLLOW = {
   match: 0.07,
   /** Each match blends this much of itself into the hand's picture. */
   learn: 0.15,
+  /** Lost: looked for over the whole picture (its picture as the tracker
+   * last saw it, still) for this long (s), matching at least this well. */
+  refindFor: 4,
+  refindScore: 0.8,
   /** Never this near (px) another hand: two fists look alike. */
   apart: 14,
   /** The tracker's place is a frame or two late: a hand moving faster than
@@ -44,6 +48,8 @@ type Held = {
   palmV: number;
   topV: number;
   tpl: Float32Array | null;
+  /** Its picture as the tracker last saw it still (never blended). */
+  anchor: Float32Array | null;
   /** The tracker's last reading (s). */
   seen: number;
   /** Its last place and time (s) (the tracker's or followed). */
@@ -134,6 +140,7 @@ export class HandFollower {
     let k = this.held.get(id);
     if (!k) {
       k = {
+        anchor: null,
         x: 0,
         y: 0,
         palmU: 0,
@@ -182,7 +189,10 @@ export class HandFollower {
     k.t = Math.max(k.t, t);
     if (!k.tpl || speed < FOLLOW.stillSpeed) {
       const p = this.patch(k.x, k.y, k.tpl ?? undefined);
-      if (p) k.tpl = p;
+      if (p) {
+        k.tpl = p;
+        if (speed < FOLLOW.stillSpeed) k.anchor = Float32Array.from(p);
+      }
     }
   }
 
@@ -219,59 +229,116 @@ export class HandFollower {
     return (cross - ps * tm) / (Math.sqrt(pv) * tn);
   }
 
-  /** Hand `id` in the current frame (time `t`), if it can still be followed. */
-  follow(id: string, t: number): Followed | null {
-    const k = this.held.get(id);
-    const { grey, sum, sq, w, h } = this;
-    if (!k || !k.tpl || !grey || !sum || !sq) return null;
-    if (t - k.seen > FOLLOW.most) return null;
-    const S = FOLLOW.size;
-    const n = S * S;
-    const { tpl } = k;
+  /** The mean and spread of a hand's picture. */
+  private static stats(tpl: Float32Array) {
+    const n = tpl.length;
     let tm = 0;
     for (let i = 0; i < n; i += 1) tm += tpl[i];
     tm /= n;
     let tn = 0;
     for (let i = 0; i < n; i += 1) tn += (tpl[i] - tm) ** 2;
-    tn = Math.sqrt(tn) + 1e-6;
-    const R = FOLLOW.reach;
-    const others: Held[] = [];
-    this.held.forEach((o, oid) => {
-      if (oid !== id && t - o.t < 0.25) others.push(o);
-    });
+    return { tm, tn: Math.sqrt(tn) + 1e-6 };
+  }
+
+  /**
+   * The best match of `tpl` with its middle within `R` px of (cx, cy) (all
+   * of the picture if R is Infinity), every `step` px, clear of `others`.
+   */
+  private search(
+    tpl: Float32Array,
+    cx0: number,
+    cy0: number,
+    R: number,
+    step: number,
+    others: Held[],
+    ok: (cx: number) => boolean = () => true,
+  ) {
+    const { w, h } = this;
+    const S = FOLLOW.size;
+    const { tm, tn } = HandFollower.stats(tpl);
+    const x0a = Math.max(S / 2, Math.round(cx0 - R));
+    const x0b = Math.min(w - S / 2, Math.round(cx0 + R));
+    const y0a = Math.max(S / 2, Math.round(cy0 - R));
+    const y0b = Math.min(h - S / 2, Math.round(cy0 + R));
     let best = -2;
-    let bx = k.x;
-    let by = k.y;
-    const near = (cx: number, cy: number) =>
-      others.some((o) => Math.hypot(o.x - cx, o.y - cy) < FOLLOW.apart);
-    for (let dy = -R; dy <= R; dy += 1) {
-      const y0 = Math.round(k.y - S / 2 + dy);
-      for (let dx = -R; dx <= R; dx += 1) {
-        const x0 = Math.round(k.x - S / 2 + dx);
-        const cx = k.x + dx;
-        const cy = k.y + dy;
-        const s =
-          y0 >= 0 && y0 + S <= h && x0 >= 0 && x0 + S <= w && !near(cx, cy)
-            ? this.score(tpl, tm, tn, x0, y0)
-            : -2;
-        if (s > best) {
-          best = s;
+    let bx = cx0;
+    let by = cy0;
+    for (let cy = y0a; cy <= y0b; cy += step)
+      for (let cx = x0a; cx <= x0b; cx += step) {
+        const clear =
+          ok(cx) &&
+          !others.some((o) => Math.hypot(o.x - cx, o.y - cy) < FOLLOW.apart);
+        const sc = clear
+          ? this.score(
+              tpl,
+              tm,
+              tn,
+              Math.round(cx - S / 2),
+              Math.round(cy - S / 2),
+            )
+          : -2;
+        if (sc > best) {
+          best = sc;
           bx = cx;
           by = cy;
         }
       }
+    return { best, bx, by };
+  }
+
+  /** Hand `id` in the current frame (time `t`), if it can still be followed. */
+  follow(id: string, t: number): Followed | null {
+    const k = this.held.get(id);
+    const { grey, sum, sq } = this;
+    if (!k || !k.tpl || !grey || !sum || !sq) return null;
+    const away = t - k.seen;
+    if (away > FOLLOW.most + FOLLOW.refindFor) return null;
+    const others: Held[] = [];
+    this.held.forEach((o, oid) => {
+      if (oid !== id && t - o.t < 0.25) others.push(o);
+    });
+    let found =
+      away <= FOLLOW.most
+        ? this.search(k.tpl, k.x, k.y, FOLLOW.reach, 1, others)
+        : { best: -2, bx: k.x, by: k.y };
+    if (found.best < FOLLOW.minScore) {
+      // Lost: look for it all over the picture, as the tracker last saw it.
+      if (!k.anchor) return null;
+      // Two fists look alike: a hand found again is on its own side of the
+      // other hand (hands seldom cross), well clear of it.
+      const ownSide = (cx: number) =>
+        others.every((o) =>
+          id === "left"
+            ? cx < o.x - FOLLOW.apart * 2
+            : cx > o.x + FOLLOW.apart * 2,
+        );
+      const wide = this.search(
+        k.anchor,
+        k.x,
+        k.y,
+        Infinity,
+        2,
+        others,
+        ownSide,
+      );
+      if (wide.best < FOLLOW.refindScore) return null;
+      found = this.search(k.anchor, wide.bx, wide.by, 2, 1, others, ownSide);
+      k.tpl.set(k.anchor);
+      k.past.length = 0;
     }
-    if (best < FOLLOW.minScore) return null;
+    const { bx, by } = found;
     k.x = bx;
     k.y = by;
     k.t = t;
     k.past.push({ t, x: bx, y: by });
     while (k.past.length && t - k.past[0].t > 0.3) k.past.shift();
     const p = this.patch(bx, by);
+    const { tpl } = k;
     if (p)
-      for (let i = 0; i < n; i += 1) tpl[i] += (p[i] - tpl[i]) * FOLLOW.learn;
-    const cu = bx / w;
-    const cv = by / h;
+      for (let i = 0; i < tpl.length; i += 1)
+        tpl[i] += (p[i] - tpl[i]) * FOLLOW.learn;
+    const cu = bx / this.w;
+    const cv = by / this.h;
     return { u: cu + k.palmU, v: cv + k.palmV, top: cv + k.topV };
   }
 }

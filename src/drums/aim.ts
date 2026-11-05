@@ -33,7 +33,7 @@ export type Spot = { id: StickPiece; x: number; y: number; r: number };
  * little higher and the snare, the most played, a little bigger). */
 export const SPOTS: readonly Spot[] = [
   { id: "hihat", x: 0, y: 0.12, r: 0.17 },
-  { id: "tom1", x: 0.42, y: 0.12, r: 0.14 },
+  { id: "tom1", x: 0.5, y: 0.3, r: 0.16 },
   { id: "crash", x: 0.91, y: 0, r: 0.17 },
   { id: "snare", x: 0.15, y: 0.99, r: 0.22 },
   { id: "tom2", x: 1, y: 1, r: 0.18 },
@@ -41,7 +41,7 @@ export const SPOTS: readonly Spot[] = [
 
 export const AIM = {
   /** The other hand's pieces count this much further away. */
-  away: 1.35,
+  away: 1.7,
   /** The shown piece changes once another is this much nearer (radii). */
   margin: 0.35,
   /** The playing level follows a hand held higher this fast (1/s) (a
@@ -54,8 +54,12 @@ export const AIM = {
    * on its way down: cymbals sit above the drums. */
   cymbalHigh: 0.06,
   cymbalSide: 0.3,
+  /** Or out past the kit's side (this far, kit x) and fairly high (above
+   * this, kit y): reaching out wide for it. */
+  cymbalWide: -0.05,
+  cymbalWideHigh: 0.2,
   /** …if the hand was up there at least this long (s), not just passing. */
-  cymbalDwell: 0.12,
+  cymbalDwell: 0.08,
   /** A hand last seen this near the picture's top (share of its height)… */
   topEdge: 0.1,
   /** …and back within this long (s) played the cymbal up there. */
@@ -175,9 +179,11 @@ export class HandAim {
  * reaching up above the drums, out on the hi-hat's side or the crash's.
  */
 export const cymbalAt = (x: number, y: number): StickPiece | null => {
-  if (y > AIM.cymbalHigh) return null;
-  if (x < AIM.cymbalSide) return "hihat";
-  return x > 1 - AIM.cymbalSide ? "crash" : null;
+  const wide = (out: number) => out > AIM.cymbalWide && y < AIM.cymbalWideHigh;
+  if (x < AIM.cymbalSide && (y < AIM.cymbalHigh || wide(-x))) return "hihat";
+  if (x > 1 - AIM.cymbalSide && (y < AIM.cymbalHigh || wide(x - 1)))
+    return "crash";
+  return null;
 };
 
 /** The piece a stroke that stopped at picture (u, v) plays, in the box `b`, for `hand`. */

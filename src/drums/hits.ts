@@ -43,10 +43,12 @@ export const STROKE = {
   /** …at least this far from its recent top… */
   minTravel: 0.1,
   /** …and lands once it slows to this share of its fastest. */
-  landShare: 0.5,
+  landShare: 0.35,
   /** A hand lost on its way down (or out of sight and back clearly lower,
    * coming down at least `startSpeed` on average) within this long (s) landed. */
   blurGap: 0.35,
+  /** (Across a gap the speed is an average: this share of `startSpeed` will do.) */
+  blurSlack: 0.8,
   /** …moving more down than sideways (down ÷ sideways at least this). */
   downRatio: 0.4,
   /** The top fades this fast (box heights/s), so a slow drift never adds up. */
@@ -95,9 +97,11 @@ export type StrokeHit = {
   /** Its sideways speed then (box heights/s). */
   side: number;
   t: number;
-  /** Where it landed (the reading's x, y). */
+  /** Where it landed (its lowest reading's x, y)… */
   x: number;
   y: number;
+  /** …and where it began (its highest). */
+  from: { x: number; y: number };
 };
 
 /** Loudness (0..1) of a stroke from its downward speed. */
@@ -140,6 +144,12 @@ export class StrokeDetector {
 
   private begun = false;
 
+  /** It has lifted since its last hit. */
+  private lifted = false;
+
+  /** The lowest reading of the stroke under way (where it lands). */
+  private lowest: HandSample | null = null;
+
   private restFor = 0;
 
   private lastHit = -Infinity;
@@ -161,6 +171,8 @@ export class StrokeDetector {
   /** Not ready until the hand lifts or rests (it just played some other way). */
   disarm(s: HandSample) {
     this.armed = false;
+    this.lifted = false;
+    this.lowest = null;
     this.begun = false;
     this.low = s.y;
     this.restFor = 0;
@@ -169,14 +181,17 @@ export class StrokeDetector {
   }
 
   private hit(s: HandSample, speed: number, side: number): StrokeHit {
+    const at = this.lowest && this.lowest.y > s.y ? this.lowest : s;
+    const from = { ...this.from };
     this.disarm(s);
     return {
       velocity: strokeVelocity(speed),
       speed,
       side,
       t: s.t,
-      x: s.x,
-      y: s.y,
+      x: at.x,
+      y: at.y,
+      from,
     };
   }
 
@@ -205,12 +220,14 @@ export class StrokeDetector {
         s.t - this.lastHit >= STROKE.minGap &&
         s.y - top >= STROKE.minTravel &&
         ((this.peak >= STROKE.startSpeed && fell > -0.02) ||
-          (fell >= STROKE.minTravel && fell / gap >= STROKE.startSpeed))
+          (fell >= STROKE.minTravel &&
+            fell / gap >= STROKE.startSpeed * STROKE.blurSlack))
       )
         out = this.hit(s, Math.max(this.peak, fell / gap), this.peakSide);
       past.length = 0;
       past.push(s);
       this.top = s.y;
+      this.from = { x: s.x, y: s.y };
       this.speed = 0;
       this.down = 0;
       this.peak = 0;
@@ -246,7 +263,8 @@ export class StrokeDetector {
       // Ready again after a real lift, or once it stops coming down.
       this.low = Math.max(this.low, s.y);
       this.restFor = down < STROKE.restSpeed ? this.restFor + step : 0;
-      const lifted = this.low - s.y > STROKE.rearmRise;
+      if (this.low - s.y > STROKE.rearmRise) this.lifted = true;
+      const { lifted } = this;
       const over =
         s.t - this.lastHit >= STROKE.rearmAfter &&
         down < STROKE.startSpeed * 0.5;
@@ -265,7 +283,10 @@ export class StrokeDetector {
     // While it comes down fast the top holds: the stroke's travel counts
     // from where it began.
     if (this.peak === 0) {
-      const fade = this.top + STROKE.topFade * step;
+      // The top fades only while the hand is about still: a stroke that
+      // starts slowly keeps its whole travel.
+      const fade =
+        down > STROKE.restSpeed ? this.top : this.top + STROKE.topFade * step;
       if (s.y <= fade) this.from = { x: s.x, y: s.y };
       this.top = Math.min(s.y, fade);
     } else if (s.y < this.top) {
@@ -275,9 +296,11 @@ export class StrokeDetector {
     const fast =
       down > STROKE.startSpeed && down >= STROKE.downRatio * Math.abs(vx);
     if (fast && down > this.peak) {
+      if (this.peak === 0) this.lowest = null;
       this.peak = down;
       this.peakSide = vx;
     }
+    if (this.peak > 0 && (!this.lowest || s.y > this.lowest.y)) this.lowest = s;
     if (this.peak === 0) return null;
     if (!this.begun && s.y - this.top >= STROKE.minTravel && fast) {
       this.begun = true;
