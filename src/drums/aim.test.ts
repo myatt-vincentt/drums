@@ -15,8 +15,8 @@ const BOX: Box = { u0: 0, u1: 1, v0: 0, v1: 1 };
 
 describe("the kit from the seat", () => {
   it("lays the pieces out as you see them", () => {
-    expect(pieceAt(0, 0.15)).toBe("hihat");
-    expect(pieceAt(0.4, 0.15)).toBe("tom1");
+    expect(pieceAt(0.1, 0.15)).toBe("hihat");
+    expect(pieceAt(0.5, 0.15)).toBe("tom1");
     expect(pieceAt(0.9, 0.05)).toBe("crash");
     expect(pieceAt(0.15, 0.95)).toBe("snare");
     expect(pieceAt(0.95, 0.95)).toBe("tom2");

@@ -4,9 +4,9 @@
 // edge and a soft shadow. Picture, edge and shadow are one quad drawn from
 // one rect (layout.ts), so they can never drift apart at any size.
 //
-// Over the picture: where each piece is played from (the same map the
-// sticks use, over your learnt reach: the hi-hat and the crash up high on
-// each side, the rack tom between, the snare and the floor tom low), named,
+// Over the picture: where each piece is played from (the same grid the
+// sticks use, over your learnt reach: the hi-hat, the tom and the crash
+// along the top, the snare and the floor tom along the bottom), named,
 // the one under each hand lit and the one just hit flashing; and each
 // tracked hand's points and bones. Tap it to tuck it
 // away (it shrinks into the corner, leaving a small camera button); tap
@@ -18,13 +18,12 @@ import {
   ShaderMaterial,
   SRGBColorSpace,
   Vector2,
-  Vector3,
   Vector4,
   type Mesh,
 } from "three";
 import { useXRCameraTexture } from "@vincentt-xr/sdk/low-level";
 
-import { AIM, SPOTS } from "./aim";
+import { AIM, GRID, SPOTS } from "./aim";
 import { ghosts, reachBox } from "./GhostHands";
 import { FRAME_RADIUS, frameRect } from "./layout";
 import { drums } from "./state";
@@ -100,8 +99,7 @@ const frag = /* glsl */ `
   uniform vec2 handR[21];
   uniform float guides;      // the pieces' map shown, 0..1
   uniform vec4 reach;        // your reach on the picture: u0, u1, v0, v1
-  uniform vec3 spots[5];     // each piece on the kit: x, y, radius (SPOTS order)
-  uniform vec4 cym;          // the cymbals' reach: high, side, wide, wide high
+  uniform vec4 grid;         // the kit's grid: row split, top thirds, bottom half
   uniform float over;        // how far past the reach the kit goes
   uniform float lit[5];      // each piece under a hand, 0..1
   uniform float flash[5];    // each piece just hit, 0..1
@@ -156,19 +154,10 @@ const frag = /* glsl */ `
     return vec2(0.5 + (c.x - 0.5) * screenAspect / pa, c.y);
   }
 
-  // The piece played from a place on the kit (as aim.ts: a cymbal up high
-  // on its side, else the nearest piece in its radii).
+  // The piece whose area of the grid holds a place on the kit (aim.ts).
   int pieceAt(vec2 k) {
-    bool high = k.y < cym.x;
-    if (k.x < cym.y && (high || (-k.x > cym.z && k.y < cym.w))) return 0;
-    if (k.x > 1.0 - cym.y && (high || (k.x - 1.0 > cym.z && k.y < cym.w))) return 2;
-    int best = 0;
-    float bd = 1e9;
-    for (int i = 0; i < 5; i++) {
-      float dd = length(k - spots[i].xy) / spots[i].z;
-      if (dd < bd) { bd = dd; best = i; }
-    }
-    return best;
+    if (k.y < grid.x) return k.x < grid.y ? 0 : (k.x < grid.z ? 1 : 2);
+    return k.x < grid.w ? 3 : 4;
   }
   float pick(float a[5], int id) {
     float v = 0.0;
@@ -206,13 +195,19 @@ const frag = /* glsl */ `
         (pic - reach.xz) / max(reach.yw - reach.xz, vec2(1e-4)),
         vec2(-over), vec2(1.0 + over));
       int id = pieceAt(k);
-      float idf = float(id);
-      float border = step(0.001, abs(dFdx(idf)) + abs(dFdy(idf)));
+      // Thin lines between the areas (1 px whatever the reach).
+      vec2 fw = max(fwidth(k), vec2(1e-5));
+      float line = 1.0 - smoothstep(0.5, 1.5, abs(k.y - grid.x) / fw.y);
+      if (k.y < grid.x) {
+        line = max(line, 1.0 - smoothstep(0.5, 1.5, abs(k.x - grid.y) / fw.x));
+        line = max(line, 1.0 - smoothstep(0.5, 1.5, abs(k.x - grid.z) / fw.x));
+      } else
+        line = max(line, 1.0 - smoothstep(0.5, 1.5, abs(k.x - grid.w) / fw.x));
       bool cymbal = id == 0 || id == 2;
       vec3 tint = cymbal ? vec3(1.0, 0.82, 0.45) : vec3(0.78, 0.9, 1.0);
       float a = 0.05 + 0.2 * pick(lit, id) + 0.4 * pick(flash, id);
       c = mix(c, tint, a * guides);
-      c = mix(c, vec3(1.0), border * 0.3 * guides);
+      c = mix(c, vec3(1.0), line * 0.55 * guides);
       for (int i = 0; i < 5; i++) {
         vec2 lp = toPanel(vec2(labelAt[i].x, 1.0 - labelAt[i].y), pa);
         vec2 q = (vPx - vec2(lp.x, 1.0 - lp.y) * size) / labelSize + 0.5;
@@ -283,14 +278,8 @@ export const CameraFrame = () => {
           handR: { value: Array.from({ length: 21 }, () => new Vector2()) },
           guides: { value: 0 },
           reach: { value: new Vector4(0.2, 0.8, 0.3, 0.75) },
-          spots: { value: SPOTS.map((sp) => new Vector3(sp.x, sp.y, sp.r)) },
-          cym: {
-            value: new Vector4(
-              AIM.cymbalHigh,
-              AIM.cymbalSide,
-              AIM.cymbalWide,
-              AIM.cymbalWideHigh,
-            ),
+          grid: {
+            value: new Vector4(GRID.row, GRID.top[0], GRID.top[1], GRID.bottom),
           },
           over: { value: AIM.over },
           lit: { value: [0, 0, 0, 0, 0] },
@@ -360,7 +349,7 @@ export const CameraFrame = () => {
       });
       // The name sits on the piece's spot, kept inside the picture.
       const lu = b.u0 + sp.x * (b.u1 - b.u0);
-      const lv = b.v0 + Math.max(0.04, sp.y) * (b.v1 - b.v0);
+      const lv = b.v0 + sp.y * (b.v1 - b.v0);
       (u.labelAt.value as Vector2[])[i].set(
         Math.min(0.92, Math.max(0.08, lu)),
         Math.min(0.94, Math.max(0.05, lv)),

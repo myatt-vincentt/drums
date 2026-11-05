@@ -29,21 +29,31 @@ export type StickPiece = Exclude<PieceId, "kick">;
 /** A piece's place on the kit as seen from the seat, and its size (kit units). */
 export type Spot = { id: StickPiece; x: number; y: number; r: number };
 
-/** The kit from the drummer's seat (from the seat view; the far row a
- * little higher and the snare, the most played, a little bigger). */
+/** Each piece's middle on the kit grid (GRID) and its size. */
 export const SPOTS: readonly Spot[] = [
-  { id: "hihat", x: 0, y: 0.12, r: 0.17 },
-  { id: "tom1", x: 0.5, y: 0.3, r: 0.16 },
-  { id: "crash", x: 0.91, y: 0, r: 0.17 },
-  { id: "snare", x: 0.15, y: 0.99, r: 0.22 },
-  { id: "tom2", x: 1, y: 1, r: 0.18 },
+  { id: "hihat", x: 1 / 6, y: 0.2, r: 0.2 },
+  { id: "tom1", x: 0.5, y: 0.2, r: 0.2 },
+  { id: "crash", x: 5 / 6, y: 0.2, r: 0.2 },
+  { id: "snare", x: 0.25, y: 0.7, r: 0.25 },
+  { id: "tom2", x: 0.75, y: 0.7, r: 0.25 },
 ];
 
+/**
+ * The kit as a grid over your reach: the top row the hi-hat, the tom and
+ * the crash, the bottom row the snare and the floor tom (as from the seat).
+ */
+export const GRID = {
+  /** The rows split here (kit y)… */
+  row: 0.4,
+  /** …the top row in thirds, the bottom row in halves. */
+  top: [1 / 3, 2 / 3] as const,
+  bottom: 0.5,
+};
+
 export const AIM = {
-  /** The other hand's pieces count this much further away. */
-  away: 1.7,
-  /** The shown piece changes once another is this much nearer (radii). */
-  margin: 0.35,
+  /** The shown piece changes once the hand is this far into another's
+   * area (kit units), not when it wavers on a border. */
+  margin: 0.04,
   /** The playing level follows a hand held higher this fast (1/s) (a
    * lower hand sets it at once). */
   rise: 2.2,
@@ -66,42 +76,19 @@ export const AIM = {
   topBack: 2.5,
 };
 
-/** Each hand's own pieces, as a drummer plays them. */
-export const HOME: Record<"left" | "right", readonly StickPiece[]> = {
-  left: ["hihat", "snare"],
-  right: ["tom1", "tom2", "crash"],
-};
-
-/** How far a point is from a spot for a hand: the other hand's pieces count further. */
-const handDistance = (s: Spot, x: number, y: number, hand?: "left" | "right") =>
-  (Math.hypot(x - s.x, y - s.y) / s.r) *
-  (hand && !HOME[hand].includes(s.id) ? AIM.away : 1);
-
 export const STICK_ORDER: StickPiece[] = SPOTS.map((s) => s.id);
 
 /** How far a point is from a spot, in its radii (1 = on the rim). */
 export const spotDistance = (s: Spot, x: number, y: number) =>
   Math.hypot(x - s.x, y - s.y) / s.r;
 
-/**
- * The piece nearest a point of the kit (in radii, so big pieces reach
- * further), for a hand if given (the other hand's pieces count further).
- */
-export const pieceAt = (
-  x: number,
-  y: number,
-  hand?: "left" | "right",
-): StickPiece => {
-  let best = SPOTS[0];
-  let bestD = Infinity;
-  SPOTS.forEach((s) => {
-    const d = handDistance(s, x, y, hand);
-    if (d < bestD) {
-      bestD = d;
-      best = s;
-    }
-  });
-  return best.id;
+/** The piece whose area of the grid holds a point of the kit. */
+export const pieceAt = (x: number, y: number): StickPiece => {
+  if (y < GRID.row) {
+    if (x < GRID.top[0]) return "hihat";
+    return x < GRID.top[1] ? "tom1" : "crash";
+  }
+  return x < GRID.bottom ? "snare" : "tom2";
 };
 
 /** The cymbal a hand reaches out of the top of the picture for. */
@@ -114,8 +101,6 @@ export const topCymbal = (u: number, b: Box): StickPiece =>
  * over (changes only clearly past the middle between two).
  */
 export class HandAim {
-  constructor(readonly hand?: "left" | "right") {}
-
   x = 0.5;
 
   y = 0.7;
@@ -160,17 +145,20 @@ export class HandAim {
     const p = inBox(b, u, this.base, AIM.over);
     this.x = p.x;
     this.y = p.y;
-    const next = pieceAt(p.x, p.y, this.hand);
-    if (!this.piece) this.piece = next;
-    else if (next !== this.piece) {
-      const cur = SPOTS.find((s) => s.id === this.piece)!;
-      const nx = SPOTS.find((s) => s.id === next)!;
-      if (
-        handDistance(nx, p.x, p.y, this.hand) + AIM.margin <
-        handDistance(cur, p.x, p.y, this.hand)
-      )
-        this.piece = next;
-    }
+    const next = pieceAt(p.x, p.y);
+    const m = AIM.margin;
+    // A new piece once clearly inside its area.
+    if (
+      !this.piece ||
+      (next !== this.piece &&
+        [
+          [m, 0],
+          [-m, 0],
+          [0, m],
+          [0, -m],
+        ].every(([dx, dy]) => pieceAt(p.x + dx, p.y + dy) === next))
+    )
+      this.piece = next;
   }
 }
 
@@ -186,13 +174,8 @@ export const cymbalAt = (x: number, y: number): StickPiece | null => {
   return null;
 };
 
-/** The piece a stroke that stopped at picture (u, v) plays, in the box `b`, for `hand`. */
-export const landedOn = (
-  u: number,
-  v: number,
-  b: Box,
-  hand?: "left" | "right",
-) => {
+/** The piece a stroke that stopped at picture (u, v) plays, in the box `b`. */
+export const landedOn = (u: number, v: number, b: Box) => {
   const p = inBox(b, u, v, AIM.over);
-  return { piece: pieceAt(p.x, p.y, hand), x: p.x, y: p.y };
+  return { piece: pieceAt(p.x, p.y), x: p.x, y: p.y };
 };

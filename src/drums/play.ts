@@ -87,8 +87,8 @@ export type HandPlay = {
   high: { piece: StickPiece; since: number; last: number } | null;
 };
 
-const newHand = (side: Side): HandPlay => ({
-  aim: new HandAim(side),
+const newHand = (): HandPlay => ({
+  aim: new HandAim(),
   detector: new StrokeDetector(),
   t: -1,
   u: 0.5,
@@ -111,8 +111,8 @@ const spot = (id: StickPiece) => SPOTS.find((s) => s.id === id)!;
 
 export class Players {
   readonly hands: Record<Side, HandPlay> = {
-    left: newHand("left"),
-    right: newHand("right"),
+    left: newHand(),
+    right: newHand(),
   };
 
   readonly reach = new ReachBox();
@@ -124,8 +124,8 @@ export class Players {
   private lastT = -1;
 
   reset() {
-    this.hands.left = newHand("left");
-    this.hands.right = newHand("right");
+    this.hands.left = newHand();
+    this.hands.right = newHand();
     this.reach.reset();
     this.reach.box(this.box);
     this.pairer.reset();
@@ -275,7 +275,7 @@ export class Players {
       // Where it landed: its lowest point.
       const lu = hit.x * unit;
       const lv = hit.y * unit;
-      const l = landedOn(lu, lv, b, side);
+      const l = landedOn(lu, lv, b);
       h.aim.land(lu, lv, b);
       play(l.piece, hit.velocity, "land", { u: lu, v: lv });
       return;
